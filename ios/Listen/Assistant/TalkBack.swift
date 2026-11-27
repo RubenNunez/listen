@@ -179,10 +179,25 @@ actor VoicePreparationGate {
 private struct SerializedLocalVoice: LocalVoiceSynthesizing {
     let base: any LocalVoiceSynthesizing
     func prepare(model: String, voice: String) async throws {
+        let requested = ProcessInfo.processInfo.systemUptime
         try await VoicePreparationGate.shared.run {
+            let began = ProcessInfo.processInfo.systemUptime
             await TalkBack.releaseUnused(except: model)
-            try Task.checkCancellation()
-            try await base.prepare(model: model, voice: voice)
+            let released = ProcessInfo.processInfo.systemUptime
+            do {
+                try Task.checkCancellation()
+                try await base.prepare(model: model, voice: voice)
+                try Task.checkCancellation()
+                VoiceTiming.note("voice_prepare", ["model": model, "state": "ready",
+                    "queue_wait_s": began - requested, "release_s": released - began,
+                    "prepare_s": ProcessInfo.processInfo.systemUptime - released])
+            } catch {
+                VoiceTiming.note("voice_prepare", ["model": model,
+                    "state": error is CancellationError ? "cancelled" : "failed",
+                    "queue_wait_s": began - requested, "release_s": released - began,
+                    "prepare_s": ProcessInfo.processInfo.systemUptime - released])
+                throw error
+            }
         }
     }
     func speech(_ text: String, model: String, voice: String, language: Language) async throws

@@ -17,3 +17,13 @@ The shared voice lifecycle was checked in development build 43. The final source
 ## Live controls
 
 On iPhone, voice selection, voice samples and the waiting sound are behind the Settings button. The start and live screens use the same 44-point control, 24-point horizontal inset and 8-point top inset. The live screen retains its explicit exit action and recording indicator. Mac voice controls remain available.
+
+## Diagnostic overhead
+
+Debug voice timing records now use a serial background writer. Admission is bounded to 1 MiB of JSON payload and 1,024 pending records. Overflow and write failures are reported as numeric `voice_trace_dropped` events once storage is writable; a benchmark containing such events is incomplete. This is best-effort diagnostic output: an abrupt process exit can lose pending records. It does not replace the session recorder.
+
+On memory-constrained devices, `voice_prepare` separates queue wait (`queue_wait_s`), old-family release (`release_s`) and model preparation (`prepare_s`). The event describes preparation, not audible output. `voice_audio` retains the distinct first-buffer and underrun measurements.
+
+The standalone `ios/Tools/bench-voice-trace.swift` compiles with the actual writer and opens no app, microphone, speaker, model or network connection. It checks 800 concurrent unique events plus an existing record, explicit overflow accounting, and recovery after a write failure. Its timing loop compares the previous synchronous append with background admission and completed writes separately.
+
+One macOS run, nine samples of 100 pre-serialized synthetic events each: median synchronous caller time 1.925 ms; new caller admission 0.031 ms; new complete-write time 2.093 ms. Total disk work has not become faster. The change moves that work off the calling executor and serializes concurrent writes. These measurements establish neither phone timing nor end-to-end voice latency.

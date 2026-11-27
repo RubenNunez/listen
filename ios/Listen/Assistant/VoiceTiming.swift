@@ -8,6 +8,9 @@ import Foundation
 /// recognised and answered.
 enum VoiceTiming {
     static let file = URL.cachesDirectory.appending(path: "voice-timing.jsonl")
+    #if DEBUG
+    private static let writer = VoiceTraceWriter(file: file)
+    #endif
 
     static func note(_ kind: String, _ fields: [String: Any]) {
         #if DEBUG
@@ -18,7 +21,7 @@ enum VoiceTiming {
                     "since_card_s", "since_voice_s", "since_sentence_s", "part", "joined", "sentences",
                     "heard_sentences", "prepared_sentences", "heard", "quiet_s", "audio",
                     "queue_priority", "card_ready_uptime_s", "since_ready_s", "queue_wait_s",
-                    "queue_position", "queue_ahead", "plan_sentences", "covered_sentences", "speech_s"] {
+                    "queue_position", "queue_ahead", "plan_sentences", "covered_sentences", "speech_s", "release_s", "prepare_s"] {
             if let value = fields[key] { line[key] = value }
         }
         // Words are only counted: what was said, and the model's answer in `usage`.
@@ -28,13 +31,7 @@ enum VoiceTiming {
             if AudioCapture.scriptedFile != nil { line[key] = text } else { line.removeValue(forKey: key) }
         }
         guard let data = try? JSONSerialization.data(withJSONObject: line, options: .sortedKeys) else { return }
-        if let handle = try? FileHandle(forWritingTo: file) {
-            defer { try? handle.close() }
-            _ = try? handle.seekToEnd()
-            try? handle.write(contentsOf: data + Data("\n".utf8))
-        } else {
-            try? (data + Data("\n".utf8)).write(to: file)
-        }
+        writer.append(data)
         #endif
     }
 }
