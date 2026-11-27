@@ -34,7 +34,7 @@ struct PrepareView: View {
 
     /// Keep navigation available when a long topic list scrolls to a new item.
     private var navigationBar: some View {
-        HStack {
+        HStack(alignment: .top) {
             Button(action: backToOrb) {
                 SessionOrb(model: model, isActive: model.microphoneOn, isVisible: !showsAccount && !showsSystem && !showsHistory)
                     .matchedGeometryEffect(id: "orb", in: orbSpace)
@@ -43,14 +43,6 @@ struct PrepareView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Back to the orb")
             Spacer()
-            Button("Settings", systemImage: "gearshape") {
-                selectedBeforeSettings = topics.selectedID
-                showsAccount = true
-            }
-            .labelStyle(.iconOnly)
-            .buttonStyle(.glass)
-            .buttonBorderShape(.circle)
-            .accessibilityLabel("Settings")
             Button("History", systemImage: "clock.arrow.circlepath") { showsHistory = true }
                 .labelStyle(.iconOnly)
                 .buttonStyle(.glass)
@@ -67,8 +59,12 @@ struct PrepareView: View {
             .labelStyle(.iconOnly)
             .buttonStyle(.glass)
             .buttonBorderShape(.circle)
+            ListenSettingsButton(identifier: "topics.settings") {
+                selectedBeforeSettings = topics.selectedID
+                showsAccount = true
+            }
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, 24)
         .padding(.vertical, 8)
         .frame(maxWidth: CardMetrics.column + 40)
         .frame(maxWidth: .infinity)

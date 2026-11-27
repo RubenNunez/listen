@@ -56,17 +56,6 @@ struct StartView: View {
             .frame(maxWidth: 230)
             .glassEffect(.regular, in: .capsule)
         }
-        .overlay(alignment: .topTrailing) {
-            Button { sheet = .settings } label: {
-                Image(systemName: "gearshape")
-                    .font(.title3)
-                    .frame(minWidth: 44, minHeight: 44)
-                    .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Settings")
-            .padding(6)
-        }
         .sheet(item: $sheet) { destination in
             switch destination {
             case .settings: AccountView(accounts: accounts, topics: topics)
@@ -81,5 +70,12 @@ struct StartView: View {
         }
         .padding(.horizontal, 24)
         .padding(.bottom, 28)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            HStack {
+                Spacer()
+                ListenSettingsButton(identifier: "start.settings") { sheet = .settings }
+            }
+            .padding(.horizontal, 24).padding(.vertical, 8)
+        }
     }
 }

@@ -22,11 +22,19 @@ struct ListenView: View {
     /// are in `SpokenHarnessBar`, so the header and the feeds do not say them a second time.
     /// Its voice and what answers are the first block of the cards (`SpokenHarnessDetails`).
     private var spoken: SpokenHarness? { model.spoken }
+    private var showsHeaderControls: Bool {
+        #if targetEnvironment(macCatalyst)
+        true
+        #else
+        spoken == nil
+        #endif
+    }
     /// The layout with what was heard as a sidebar.
     @State private var wide = false
     /// The height of the whole screen, with what the header and the controls take. The fixed
     /// header gives the spoken words a share of it, so the cards keep the rest.
     @State private var fullHeight: CGFloat = 700
+    @State private var showsVoiceSettings = false
 
     var body: some View {
         Group {
@@ -49,6 +57,25 @@ struct ListenView: View {
         .onGeometryChange(for: CGFloat.self) { $0.size.height.rounded() } action: { fullHeight = $0 }
         .animation(.smooth, value: showLayers)
         .animation(.smooth, value: showHeard)
+        #if !targetEnvironment(macCatalyst)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if spoken != nil {
+                HStack {
+                    Spacer()
+                    ListenSettingsButton(identifier: "spoken.settings") { showsVoiceSettings = true }
+                }
+                .padding(.horizontal, 24).padding(.vertical, 8)
+            }
+        }
+        .sheet(isPresented: $showsVoiceSettings) {
+            if let spoken {
+                LiveVoiceSettings(configuration: spoken.configuration, language: model.core.language,
+                    preview: spoken.preview, canSample: !spoken.paused,
+                    canPreviewPulse: !spoken.speaking && !spoken.hearing,
+                    choose: { try spoken.chooseVoice($0) }, sample: { spoken.playSample() })
+            }
+        }
+        #endif
     }
 
     private var feed: some View {
@@ -98,6 +125,7 @@ struct ListenView: View {
 
     private var header: some View {
         VStack(spacing: 8) {
+            if showsHeaderControls {
             HStack {
                 HStack(spacing: 8) {
                     Circle()
@@ -154,6 +182,7 @@ struct ListenView: View {
                 }
             }
             .dynamicTypeSize(...(spoken != nil ? DynamicTypeSize.accessibility1 : .accessibility5))
+            }
             participants
                 .dynamicTypeSize(...(spoken != nil ? DynamicTypeSize.accessibility1 : .accessibility5))
             // Messages are short notes, not bars: on a Mac they stay a narrow,

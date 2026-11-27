@@ -12,6 +12,7 @@ struct AssistantView: View {
     /// The reply is on screen: it fades in with its voice and out again after it.
     @State private var replyShown = false
     @State private var revealClock = ReplyRevealClock()
+    @State private var showsVoiceSettings = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// A question is out and its answer cannot be heard yet: the thinking sound plays, unless
     /// the person is speaking again.
@@ -131,6 +132,7 @@ struct AssistantView: View {
         }
         .scrollBounceBehavior(.basedOnSize)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewport = $0 }
+        #if targetEnvironment(macCatalyst)
         .safeAreaInset(edge: .top, spacing: 0) {
             HStack(alignment: .top, spacing: 12) {
                 AssistantVoiceMenu(current: assistant.voice, language: assistant.language, preview: assistant.preview,
@@ -147,6 +149,25 @@ struct AssistantView: View {
             .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 12)
             .background(.bar)
         }
+        #else
+        .safeAreaInset(edge: .top, spacing: 0) {
+            HStack {
+            Button("End conversation", systemImage: "xmark", action: close)
+                .labelStyle(.iconOnly).buttonStyle(.glass).buttonBorderShape(.circle).controlSize(.large)
+                .frame(width: 44, height: 44)
+                .accessibilityIdentifier("assistant.close")
+            Spacer()
+            ListenSettingsButton(identifier: "assistant.settings") { showsVoiceSettings = true }
+            }
+            .padding(.horizontal, 24).padding(.vertical, 8)
+        }
+        .sheet(isPresented: $showsVoiceSettings) {
+            LiveVoiceSettings(configuration: assistant.configuration, language: assistant.language,
+                preview: assistant.preview, canSample: !assistant.paused,
+                canPreviewPulse: !assistant.speaking && !assistant.hearing,
+                choose: { try assistant.chooseVoice($0) }, sample: { assistant.playSample() })
+        }
+        #endif
         .task(id: ReplyMoment(response: assistant.lastReplyID, text: assistant.lastReply, speaking: assistant.speaking, audible: assistant.audible, flowing: assistant.voiceFlowing, interrupted: assistant.replyWasInterrupted, speechCharacters: assistant.replySpeechCharacters, playbackEnded: assistant.replyPlaybackEnded)) {
             await fadeReply()
         }

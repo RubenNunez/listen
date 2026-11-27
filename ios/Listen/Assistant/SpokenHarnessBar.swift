@@ -197,11 +197,13 @@ struct SpokenHarnessDetails: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            #if targetEnvironment(macCatalyst)
             AssistantVoiceMenu(current: spoken.voice, language: model.core.language, preview: spoken.preview,
                                canSample: !spoken.paused,
                                canPreviewPulse: !spoken.speaking && !spoken.hearing,
                                choose: { try spoken.chooseVoice($0) }, sample: { spoken.playSample() })
                 .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+            #endif
             LocalVoiceNotice(configuration: spoken.configuration).font(.caption)
             if !spoken.source.isEmpty {
                 DisclosureGroup("What answers", isExpanded: $showsSource) {

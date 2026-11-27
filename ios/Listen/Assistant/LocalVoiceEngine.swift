@@ -1,10 +1,10 @@
+import SwiftUI
 import Foundation
 import HuggingFace
 import MLX
 import MLXAudioCore
 import MLXAudioTTS
 import Observation
-import SwiftUI
 
 /// The local voice's files and what the user sees of it: which models are on the device,
 /// a running download, and why the voice is silent if it is.
@@ -26,6 +26,8 @@ import SwiftUI
     private var downloads: [String: Download] = [:]
     @ObservationIgnored private var tasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var removals: [String: Task<Void, Never>] = [:]
+    private static var preloadTask: Task<Void, Never>?
+    static func cancelPreload() { preloadTask?.cancel(); preloadTask = nil }
 
     /// `LISTEN_TALKBACK_MODELS` moves the folder, for measurements that must not touch
     /// the user's own. `~` is the app's home, so a run on a phone can name a folder there.
@@ -76,15 +78,19 @@ import SwiftUI
     /// wait for the model: 14.7 s on an iPhone 15 Pro Max (21 November 2026). Nothing is
     /// downloaded here, and a topic without the local voice loads nothing.
     static func preload(for topic: Topic) {
+        cancelPreload()
         guard !topic.archived else { return }
         var system = SystemConfig.load()
         SystemStore().chosen(for: topic).apply(to: &system.config)
         guard let voice = system.config.conversation, voice.enabled, voice.speakReplies, voice.talkBackEngine == .local,
               cannotRun(voice.talkBackModel) == nil, TalkBack.unsupported(voice.talkBackModel, language: topic.language) == nil,
               complete(voice.talkBackModel) != nil else { return }
-        Task {
-            try? await TalkBack.synthesizer(for: voice.talkBackModel).prepare(model: voice.talkBackModel, voice: voice.talkBackVoice)
-            try? await ConversationReactionAudio.shared.prepare(model: voice.talkBackModel, voice: voice.talkBackVoice, language: topic.language)
+        preloadTask = Task {
+            do {
+                try await TalkBack.synthesizer(for: voice.talkBackModel).prepare(model: voice.talkBackModel, voice: voice.talkBackVoice)
+                try Task.checkCancellation()
+                try await ConversationReactionAudio.shared.prepare(model: voice.talkBackModel, voice: voice.talkBackVoice, language: topic.language)
+            } catch { /* A cancelled/failed prewarm must not begin another voice load. */ }
         }
     }
 
@@ -274,19 +280,21 @@ actor QwenVoice: LocalVoiceSynthesizing {
         return stream
     }
 
-    func unload(_ id: String) {
-        if loaded?.id == id { loaded = nil }
-        if loading?.id == id {
-            loading?.task.cancel()
-            loading = nil
-        }
+    func unload(_ id: String) async {
+        if loaded?.id == id || loading?.id == id { await unloadAll() }
     }
 
     /// Frees whichever model is loaded (`TalkBack.release`).
-    func unloadAll() {
+    func unloadAll() async {
+        let hadModel = loaded != nil || loading != nil || last != nil
+        let initializing = loading?.task, generating = last
+        initializing?.cancel(); generating?.cancel()
         loaded = nil
-        loading?.task.cancel()
         loading = nil
+        last = nil
+        await generating?.value
+        _ = await initializing?.result
+        if hadModel { Memory.clearCache() }
     }
 
     private func load(_ id: String, voice: String) async throws -> Qwen3TTSModel {
@@ -301,14 +309,29 @@ actor QwenVoice: LocalVoiceSynthesizing {
         }
         loaded = nil
         let task = Task.detached {
+            try Task.checkCancellation()
+            #if os(iOS) && !targetEnvironment(macCatalyst)
+            Memory.cacheLimit = min(Memory.cacheLimit, 128 * 1_048_576)
+            #endif
             let model = try await Qwen3TTSModel.fromModelDirectory(folder)
+            try Task.checkCancellation()
             // The first generation compiles the kernels. Its audio is dropped.
-            for try await _ in Self.generate(model, "Hallo.", voice: voice, language: .de, limit: 40) {}
+            for try await _ in Self.generate(model, "Hallo.", voice: voice, language: .de, limit: 40) {
+                try Task.checkCancellation()
+            }
             return model
         }
         loading = (id, task)
         defer { if loading?.id == id { loading = nil } }
-        let model = try await task.value
+        let model: Qwen3TTSModel
+        if ProcessInfo.processInfo.physicalMemory < 12 * 1_073_741_824 {
+            model = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+            try Task.checkCancellation()
+        } else {
+            // Roomier machines share a warmup between callers. Cancelling one caller
+            // must not cancel the model another caller is already waiting for.
+            model = try await task.value
+        }
         if loading?.id == id { loaded = (id, model) }
         return model
     }
@@ -379,10 +402,12 @@ private final class FixedVoiceAudio: @unchecked Sendable {
 }
 
 /// The talk-back rows of a voice system's settings.
+
 struct TalkBackSettings: View {
     /// The whole configuration, so model and voice change in one write. Only the three
     /// talk-back fields are touched here.
     @Binding var configuration: VoiceAssistantConfiguration
+    @State private var preview = AssistantVoicePreview()
     private let store = LocalVoice.shared
     private var engine: TalkBackEngine { configuration.talkBackEngine }
     private var model: String { configuration.talkBackModel }
@@ -434,6 +459,20 @@ struct TalkBackSettings: View {
                 .font(.caption).foregroundStyle(.secondary)
             if TalkBack.model(model)?.family == .supertonic { SupertonicLicenseNotice() }
         }
+        HStack {
+            Button(preview.playing == nil ? "Play voice sample" : "Stop voice sample",
+                   systemImage: preview.playing == nil ? "play.fill" : "stop.fill") {
+                if preview.playing == nil {
+                    preview.play(.init(configuration), configuration: configuration, language: .de)
+                } else { preview.stop() }
+            }
+            .disabled(engine == .local && LocalVoice.complete(model) == nil)
+            .accessibilityIdentifier("voice.settings.sample")
+            Spacer()
+            ThinkingSoundControl(canPreview: preview.playing == nil)
+        }
+        .onDisappear { @Sendable [preview] in Task { @MainActor in preview.stop() } }
+        if let failure = preview.failure { Text(failure).font(.caption).foregroundStyle(.orange) }
     }
 
     static func size(_ model: TalkBack.Model) -> String {

@@ -127,23 +127,70 @@ enum TalkBack {
 
     /// The synthesizer that runs a catalogue model.
     static func synthesizer(for model: String) -> any LocalVoiceSynthesizing {
+        let base: any LocalVoiceSynthesizing
         switch Self.model(model)?.family {
-        case .pocket: PocketVoice.shared
-        case .supertonic: SupertonicVoice.shared
-        default: QwenVoice.shared
+        case .pocket: base = PocketVoice.shared
+        case .supertonic: base = SupertonicVoice.shared
+        default: base = QwenVoice.shared
         }
+        return ProcessInfo.processInfo.physicalMemory < 12 * 1_073_741_824
+            ? SerializedLocalVoice(base: base) : base
     }
 
     /// After a change of voice: frees the other family's model where memory is short. With
     /// 12 GB or more both stay loaded, so switching back needs no reload. The threshold is
     /// a guess, not a measurement.
-    static func release(except model: String) {
+    @MainActor static func release(except model: String) {
+        LocalVoice.cancelPreload()
         guard ProcessInfo.processInfo.physicalMemory < 12 * 1_073_741_824 else { return }
-        let kept = Self.model(model)?.family
         Task {
-            if kept != .qwen { await QwenVoice.shared.unloadAll() }
-            if kept != .pocket { await PocketVoice.shared.unload() }
-            if kept != .supertonic { await SupertonicVoice.shared.unload() }
+            try? await VoicePreparationGate.shared.run { await releaseUnused(except: model) }
+        }
+    }
+
+    static func releaseUnused(except model: String) async {
+        let kept = Self.model(model)?.family
+        if kept != .qwen { await QwenVoice.shared.unloadAll() }
+        if kept != .pocket { await PocketVoice.shared.unload() }
+        if kept != .supertonic { await SupertonicVoice.shared.unload() }
+    }
+}
+
+/// A cancelled SDK load may finish later. Keep its actual completion ahead of the
+/// next family's allocation, rather than just scheduling an asynchronous cleanup.
+actor VoicePreparationGate {
+    static let shared = VoicePreparationGate()
+    private var tail: Task<Void, Never>?
+
+    func run<Value: Sendable>(_ operation: @escaping @Sendable () async throws -> Value) async throws -> Value {
+        let previous = tail
+        let job = Task {
+            await previous?.value
+            try Task.checkCancellation()
+            let value = try await operation()
+            try Task.checkCancellation()
+            return value
+        }
+        tail = Task { _ = await job.result }
+        return try await withTaskCancellationHandler { try await job.value } onCancel: { job.cancel() }
+    }
+}
+
+private struct SerializedLocalVoice: LocalVoiceSynthesizing {
+    let base: any LocalVoiceSynthesizing
+    func prepare(model: String, voice: String) async throws {
+        try await VoicePreparationGate.shared.run {
+            await TalkBack.releaseUnused(except: model)
+            try Task.checkCancellation()
+            try await base.prepare(model: model, voice: voice)
+        }
+    }
+    func speech(_ text: String, model: String, voice: String, language: Language) async throws
+        -> AsyncThrowingStream<LocalVoiceChunk, Error> {
+        try await VoicePreparationGate.shared.run {
+            await TalkBack.releaseUnused(except: model)
+            try Task.checkCancellation()
+            return try await base.speech(text, model: model, voice: voice, language: language)
         }
     }
 }

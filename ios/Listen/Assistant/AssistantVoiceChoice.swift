@@ -321,3 +321,41 @@ struct AssistantVoicePickerFixture: View, Identifiable {
     }
 }
 #endif
+
+struct ListenSettingsButton: View {
+    var identifier = "listen.settings"
+    let action: () -> Void
+    var body: some View {
+        Button("Settings", systemImage: "gearshape", action: action)
+            .labelStyle(.iconOnly).buttonStyle(.glass).buttonBorderShape(.circle).controlSize(.large)
+            .frame(width: 44, height: 44)
+            .accessibilityIdentifier(identifier)
+    }
+}
+
+/// Conversation controls live behind one settings button on a phone.
+struct LiveVoiceSettings: View {
+    let configuration: VoiceAssistantConfiguration
+    let language: Language
+    let preview: AssistantVoicePreview
+    let canSample: Bool
+    let canPreviewPulse: Bool
+    let choose: (AssistantVoiceChoice) throws -> Void
+    let sample: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Voice") {
+                    AssistantVoiceMenu(current: .init(configuration), language: language, preview: preview,
+                        canSample: canSample, canPreviewPulse: canPreviewPulse, choose: choose, sample: sample)
+                    LocalVoiceNotice(configuration: configuration)
+                }
+            }
+            .navigationTitle("Voice settings")
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
+        .onDisappear { @Sendable [preview] in Task { @MainActor in preview.stop() } }
+    }
+}

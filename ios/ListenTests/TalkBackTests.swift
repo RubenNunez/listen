@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import AudioToolbox
+import Darwin
 import Testing
 
 @testable import Listen
@@ -1514,6 +1515,84 @@ private final class GenerationScript: @unchecked Sendable {
         #expect(heard.values == [1, 1])
     }
 }
+
+private actor VoiceLoadProbe {
+    var events: [String] = []
+    private var finish: CheckedContinuation<Void, Never>?
+    func initialize() async {
+        events.append("loading old voice")
+        // A non-cooperative SDK load does not finish merely because its caller cancels.
+        await withCheckedContinuation { finish = $0 }
+        events.append("old initializer exited")
+    }
+    func release() { finish?.resume(); finish = nil }
+    func next() { events.append("loading next voice") }
+}
+
+@Suite struct VoicePreparationTests {
+    @Test func aVoiceSwitchWaitsForCancelledSDKInitializationToActuallyExit() async throws {
+        let gate = VoicePreparationGate(), probe = VoiceLoadProbe()
+        let old = Task { try await gate.run { await probe.initialize() } }
+        for _ in 0..<1000 {
+            if !(await probe.events).isEmpty { break }
+            await Task.yield()
+        }
+        #expect(await probe.events == ["loading old voice"])
+        old.cancel()
+        let next = Task { try await gate.run { await probe.next() } }
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(await probe.events == ["loading old voice"], "The next model cannot allocate during cancelled SDK work")
+        await probe.release()
+        await #expect(throws: CancellationError.self) { try await old.value }
+        try await next.value
+        #expect(await probe.events == ["loading old voice", "old initializer exited", "loading next voice"])
+    }
+}
+
+#if os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
+@Suite struct PhoneVoiceMemoryProbe {
+    private func footprint() -> UInt64 {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let capacity = Int(count)
+        let status = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: capacity) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        return status == KERN_SUCCESS ? info.phys_footprint : 0
+    }
+
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["LISTEN_QWEN_MEMORY_PROBE"] == "1"))
+    func boundedQwenPreparationAndReleaseWithoutMicrophoneOrPlayback() async throws {
+        #expect(AudioCapture.physicalInputDisabled && TalkBack.muted)
+        let model = TalkBack.defaultModel
+        try #require(LocalVoice.complete(model) != nil, "Existing local Qwen files are required; never downloaded by this probe")
+        let before = footprint()
+        let sampler = Task {
+            var peak = footprint()
+            while !Task.isCancelled {
+                peak = max(peak, footprint())
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            return peak
+        }
+        do {
+            try await TalkBack.synthesizer(for: model).prepare(model: model, voice: "Serena")
+        } catch { sampler.cancel(); _ = await sampler.value; throw error }
+        sampler.cancel()
+        let peak = await sampler.value
+        try await VoicePreparationGate.shared.run { await TalkBack.releaseUnused(except: TalkBack.supertonic) }
+        let after = footprint()
+        let fields: [String: Any] = ["before_bytes": before, "peak_bytes": peak, "after_release_bytes": after,
+            "physical_audio": false, "qwen_prepared": true, "released_before_next_family": true]
+        try JSONSerialization.data(withJSONObject: fields, options: .sortedKeys)
+            .write(to: URL.cachesDirectory.appending(path: "voice-memory-probe.json"), options: .atomic)
+        #expect(before > 0 && peak > 0)
+        #expect(peak < 3_000_000_000, "Stay below the observed3.60GB process kill")
+    }
+}
+#endif
 
 private final class Heard: @unchecked Sendable {
     private let lock = NSLock()
