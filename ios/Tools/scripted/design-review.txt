@@ -1,0 +1,29 @@
+# English counterpart of architecture-review.txt; run with LISTEN_LANGUAGE=en and English voices:
+#   LISTEN_LANGUAGE=en ios/Tools/scripted/run.sh ios/Tools/scripted/design-review.txt "Samantha (English (US))" "Reed (English (US))"
+# Two engineers review the design of a notification service. Covers: a definition, a growing
+# block, a formula, code, a drawing, a number that needs the web, small talk, a change of thing.
+A: Hi, I'm Anna. Thanks for taking the time for this review.
+B: Hi Anna, I'm Mark. Sure, show me what you have planned for the notification service.
+--
+A: We want to distribute the messages through a queue. What exactly is the difference between at-least-once and exactly-once delivery?
+B: Good question. And how do you make a consumer idempotent, so that duplicate messages do no harm?
+--
+A: We expect two thousand messages per second, and each one takes fifty milliseconds on average. How many workers do we need at least?
+--
+B: Can you show me a Python function for a retry with exponential backoff and jitter?
+--
+A: Please draw a simple diagram as SVG: client, API, queue and worker as boxes with arrows between them.
+--
+B: By the way, did you watch the game at the weekend?
+A: No, I was at the zoo with the kids. It was lovely, though.
+--
+B: Back to the topic. What is the maximum message size Amazon SQS allows, and how long does it keep messages at most?
+A: We should check that before we commit to it.
+! blocks 5
+! expect at-least-once | exactly-once
+! expect idempot
+! expect 100 | worker
+! expect ```python | sleep
+! expect <svg | <rect
+! expect SQS | days
+! silent zoo

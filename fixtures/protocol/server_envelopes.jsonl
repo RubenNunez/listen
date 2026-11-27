@@ -1,0 +1,13 @@
+{"v":1,"seq":1,"event":{"type":"state","state":"paused","reason":"interrupted"}}
+{"v":1,"seq":2,"event":{"type":"transcript","segment_id":3,"is_final":true,"revision":2,"voice":1,"speaker":{"kind":"speaker","n":1},"text":"Wie testen Sie das?","start_ms":100,"end_ms":900}}
+{"v":1,"seq":3,"event":{"type":"transcript","segment_id":4,"is_final":false,"revision":1,"voice":null,"speaker":{"kind":"unknown"},"text":"Ähm","start_ms":1000,"end_ms":1200}}
+{"v":1,"seq":4,"event":{"type":"speaker_mapping","version":1,"me_voice":2}}
+{"v":1,"seq":5,"event":{"type":"audio_gap","first_missing_seq":3,"frames":3}}
+{"v":1,"seq":6,"event":{"type":"card_started","generation_id":2,"kind":"deep","style":"technical_detail","trigger_segment":3,"source_card":1,"context_version":7,"mapping_version":1}}
+{"v":1,"seq":7,"event":{"type":"card_delta","generation_id":2,"text":"Mit einem Lasttest."}}
+{"v":1,"seq":8,"event":{"type":"card_finished","generation_id":2}}
+{"v":1,"seq":9,"event":{"type":"card_superseded","generation_id":2,"by":3}}
+{"v":1,"seq":10,"event":{"type":"card_cancelled","generation_id":3}}
+{"v":1,"seq":11,"event":{"type":"card_error","generation_id":3,"code":"model_provider"}}
+{"v":1,"seq":12,"event":{"type":"budget","spent_nanousd":1000000,"limit_nanousd":3000000000,"exhausted":false}}
+{"v":1,"seq":13,"event":{"type":"error","code":"replay_gap"}}

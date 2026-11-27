@@ -1,0 +1,51 @@
+# What the output side should do with written German conversations.
+# Blocks are separated by empty lines: CARD or NONE, then the sentences.
+# The first five are what was really said to the app in the first recorded runs.
+
+NONE
+Kannst du nun besser zuhören?
+
+NONE
+Und was ist mit Informationen?
+
+NONE
+Zeig mal, ob das jetzt funktioniert.
+Das bin ich.
+
+CARD
+Mach einen Aufsatz über Käfer.
+
+NONE
+Das Wetter ist heute wirklich schön, oder?
+Ja, endlich mal wieder Sonne.
+
+NONE
+Ich hole mir noch schnell einen Kaffee, willst du auch einen?
+Nein danke, ich hatte gerade einen.
+
+NONE
+Wie war eigentlich dein Wochenende?
+Ganz gut, wir waren bei meinen Eltern.
+
+CARD
+Wann kommt eigentlich GTA 6 raus?
+
+CARD
+Wie hoch ist der Eiffelturm nochmal?
+
+CARD
+Können Sie mir erklären, wie Sie Backpressure in einem Streaming-Dienst umsetzen?
+
+CARD
+Was war nochmal der Unterschied zwischen TCP und UDP?
+
+CARD
+Wir überlegen, ob wir Redis oder Kafka für die Queue nehmen.
+Ich kenne die Unterschiede ehrlich gesagt nicht genau.
+
+CARD
+Ich habe gelesen, dass die Schweiz 26 Kantone hat, stimmt das?
+
+NONE
+Okay, dann fangen wir mal an.
+Ja, gerne.

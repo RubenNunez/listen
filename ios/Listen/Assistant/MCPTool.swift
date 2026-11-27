@@ -1,0 +1,205 @@
+import Foundation
+
+struct MCPTool: Codable, Equatable, Sendable {
+    var name: String
+    var description: String
+    var inputSchema: [String: HarnessValue]
+
+    static func read(_ value: HarnessValue) throws -> Self {
+        guard let object = value.object, let name = object["name"]?.string,
+              !name.isEmpty, name.utf8.count <= 128, let schema = object["inputSchema"]?.object else { throw MCPFailure.invalidResponse }
+        return Self(name: name, description: String((object["description"]?.string ?? "").prefix(1000)), inputSchema: schema)
+    }
+
+    /// A deliberately bounded schema subset; unsupported tools remain visible but unavailable.
+    var fields: [String: ConversationToolField]? {
+        guard name.wholeMatch(of: /[A-Za-z0-9_.-]{1,100}/) != nil,
+              inputSchema["type"] == .string("object"),
+              Set(inputSchema.keys).isSubset(of: ["type", "properties", "required", "additionalProperties", "description", "title", "$schema"]),
+              let properties = inputSchema["properties"]?.object, properties.count <= 32 else { return nil }
+        var result: [String: ConversationToolField] = [:]
+        for (name, value) in properties {
+            guard name.wholeMatch(of: /[A-Za-z0-9_.-]{1,100}/) != nil, let schema = value.object,
+                  let field = Self.field(schema) else { return nil }
+            result[name] = field
+        }
+        if let required = inputSchema["required"] {
+            guard case .array(let values) = required, values.allSatisfy({ $0.string != nil && properties[$0.string!] != nil }),
+                  Set(values.compactMap(\.string)).count == values.count else { return nil }
+        }
+        return result
+    }
+
+    private static func field(_ schema: [String: HarnessValue], allowArray: Bool = true) -> ConversationToolField? {
+        let scalarKeys: Set<String> = ["type", "description", "title", "default", "enum", "minimum", "maximum", "minLength", "maxLength"]
+        let isArray = schema["type"] == .string("array")
+        let allowed = isArray ? Set(["type", "description", "title", "default", "enum", "items", "minItems", "maxItems", "uniqueItems"]) : scalarKeys
+        guard Set(schema.keys).isSubset(of: allowed) else { return nil }
+        if let enumeration = schema["enum"] {
+            guard case .array = enumeration else { return nil }
+        }
+        for key in ["minimum", "maximum", "minLength", "maxLength", "minItems", "maxItems"] {
+            if let bound = schema[key] {
+                guard let n = bound.numeric, n.isFinite else { return nil }
+                if key != "minimum" && key != "maximum", n < 0 || n.rounded() != n { return nil }
+            }
+        }
+        switch schema["type"]?.string {
+        case "string": return .string
+        case "integer": return .integer
+        case "number": return .number
+        case "boolean": return .boolean
+        case "array":
+            guard allowArray, let items = schema["items"]?.object,
+                  let item = field(items, allowArray: false) else { return nil }
+            if let unique = schema["uniqueItems"], unique != .bool(true) && unique != .bool(false) { return nil }
+            return .array(item)
+        default: return nil
+        }
+    }
+
+    var required: Set<String> {
+        guard case .array(let values) = inputSchema["required"] else { return [] }
+        return Set(values.compactMap(\.string))
+    }
+
+    func accepts(_ arguments: [String: ConversationValue]) -> Bool {
+        guard let fields, required.isSubset(of: Set(arguments.keys)), Set(arguments.keys).isSubset(of: Set(fields.keys)) else { return false }
+        for (name, value) in arguments {
+            guard fields[name]?.accepts(value) == true, let schema = inputSchema["properties"]?.object?[name]?.object else { return false }
+            guard Self.accepts(value, schema: schema) else { return false }
+        }
+        return true
+    }
+
+    private static func accepts(_ value: ConversationValue, schema: [String: HarnessValue]) -> Bool {
+        if case .array(let allowed) = schema["enum"], !allowed.contains(value.harness) { return false }
+        if let number = value.harness.numeric {
+            if !number.isFinite { return false }
+            if let minimum = schema["minimum"]?.numeric, number < minimum { return false }
+            if let maximum = schema["maximum"]?.numeric, number > maximum { return false }
+        }
+        if case .string(let text) = value {
+            if let minimum = schema["minLength"]?.numeric, Double(text.count) < minimum { return false }
+            if let maximum = schema["maxLength"]?.numeric, Double(text.count) > maximum { return false }
+        }
+        if case .array(let values) = value {
+            guard let items = schema["items"]?.object else { return false }
+            if let minimum = schema["minItems"]?.numeric, Double(values.count) < minimum { return false }
+            if let maximum = schema["maxItems"]?.numeric, Double(values.count) > maximum { return false }
+            if schema["uniqueItems"] == .bool(true) {
+                for index in values.indices where values[..<index].contains(values[index]) { return false }
+            }
+            if !values.allSatisfy({ accepts($0, schema: items) }) { return false }
+        }
+        return true
+    }
+}
+
+extension HarnessValue {
+    var numeric: Double? {
+        switch self {
+        case .integer(let value): Double(value)
+        case .unsigned(let value): Double(value)
+        case .number(let value): value
+        default: nil
+        }
+    }
+}
+
+/// Presentation uses only an observed result, never the model's proposed success text.
+enum AssistantToolFeedback {
+    static func speech(for result: ConversationOperationState, tool: String?,
+                       arguments: [String: ConversationValue], language: Language, variant: Int = 0) -> String? {
+        func text(_ en: String, _ de: String) -> String { language == .de ? de : en }
+        switch result {
+        case .succeeded(let detail):
+            if ["HassTurnOn", "HassTurnOff"].contains(tool ?? ""),
+               arguments["domain"] == .array([.string("light")]),
+               let data = detail.data(using: .utf8), (try? HarnessJSON.checkUniqueKeys(data)) != nil,
+               let value = try? JSONDecoder().decode(HarnessValue.self, from: data),
+               value.object?["response_type"] == .string("action_done"),
+               case .array(let success) = value.object?["data"]?.object?["success"],
+               case .array(let failed) = value.object?["data"]?.object?["failed"] {
+                guard failed.isEmpty else {
+                    return success.isEmpty
+                        ? text("Home Assistant could not switch the lights.", "Home Assistant konnte die Lichter nicht schalten.")
+                        : text("Some lights could not be switched. Check the details.", "Einige Lichter konnten nicht geschaltet werden. Schau bitte in die Details.")
+                }
+                // Home Assistant includes matched area/floor records alongside the
+                // actual entity receipts. Those records are not extra lamps or errors.
+                let entities = success.filter { $0.object?["type"] == .string("entity") }
+                guard !entities.isEmpty, success.allSatisfy({
+                    guard let type = $0.object?["type"]?.string else { return false }
+                    return type == "entity" || type == "area" || type == "floor"
+                }), entities.allSatisfy({
+                    $0.object?["id"]?.string?.hasPrefix("light.") == true
+                }) else { return text("Home Assistant has not confirmed any switched lights.", "Home Assistant hat keine geschalteten Lichter bestätigt.") }
+                let single = entities.count == 1
+                let target: String?
+                if arguments["name"] != nil, single {
+                    target = label(entities[0].object?["name"]?.string)
+                } else { target = nil }
+                let areas = success.filter { $0.object?["type"] == .string("area") }
+                // A whole-home receipt can contain several areas. Never attribute
+                // all its lamps to the first returned room.
+                let area = arguments["area"] != nil && areas.count == 1 ? label(areas[0].object?["name"]?.string) : nil
+                let index = abs(variant % 3), off = tool == "HassTurnOff"
+                if let target {
+                    let state = text(off ? "off" : "on", off ? "aus" : "an")
+                    let phrases = language == .de
+                        ? ["\(target) ist jetzt \(state).", "Erledigt, \(target) ist \(state).", "\(target): Das Licht ist \(state)."]
+                        : ["\(target) is now \(state).", "Done, \(target) is \(state).", "The light \(target) is \(state)."]
+                    return phrases[index]
+                }
+                if let area {
+                    if language == .de {
+                        let location = location(area), noun = single ? "ist das Licht" : "sind die Lichter", state = off ? "aus" : "an"
+                        return ["\(location) \(noun) jetzt \(state).", "Erledigt, \(location.prefix(1).lowercased())\(location.dropFirst()) \(noun) \(state).", "\(location) \(noun) \(state)."][index]
+                    }
+                    let noun = single ? "the light is" : "the lights are", state = off ? "off" : "on"
+                    return ["In \(area), \(noun) now \(state).", "Done, \(noun) \(state) in \(area).", "In \(area), \(noun) \(state)."][index]
+                }
+                let state = text(off ? "off" : "on", off ? "aus" : "an")
+                if language == .de {
+                    let noun = single ? "Das Licht ist" : "Die Lichter sind"
+                    return ["\(noun) \(off ? "ausgeschaltet" : "eingeschaltet").",
+                            "Erledigt, \(single ? "das Licht ist" : "die Lichter sind") \(state).",
+                            "\(noun) jetzt \(state)."][index]
+                }
+                let noun = single ? "The light is" : "The lights are"
+                return ["\(noun) switched \(state).", "Done, \(single ? "the light is" : "the lights are") \(state).", "\(noun) now \(state)."][index]
+            }
+            return text("The service has responded. Details are available in the app.", "Die Rückmeldung ist da. Die Details findest du in der App.")
+        case .failed:
+            return text("The service reported an error. Check the details.", "Der Dienst meldet einen Fehler. Schau bitte in die Details.")
+        case .outcomeUnknown:
+            return text("The result is unknown. I will not repeat the action.", "Das Ergebnis ist unbekannt. Ich wiederhole die Aktion nicht.")
+        case .cancelledBeforeDispatch:
+            return text("The action was not sent.", "Die Aktion wurde nicht gesendet.")
+        default: return nil
+        }
+    }
+
+    /// A returned label is data, never speech instructions or raw service output.
+    private static func label(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, text.count <= 80,
+              text.allSatisfy({ $0.isLetter || $0.isNumber || " -'’".contains($0) }) else { return nil }
+        return text
+    }
+
+    private static func location(_ area: String) -> String {
+        let lower = area.lowercased()
+        if ["küche", "garage", "diele", "kammer"].contains(where: lower.hasSuffix) { return "In der \(area)" }
+        if lower.hasSuffix("terrasse") { return "Auf der \(area)" }
+        if lower.hasSuffix("balkon") { return "Auf dem \(area)" }
+        if ["zimmer", "büro", "bad", "studio", "atelier", "flur", "keller", "garten"].contains(where: lower.hasSuffix) { return "Im \(area)" }
+        return "Im Bereich \(area)"
+    }
+
+    static func variant(for operation: ConversationOperationID) -> Int {
+        operation.rawValue.utf8.reduce(0) { ($0 * 31 + Int($1)) % 3 }
+    }
+}

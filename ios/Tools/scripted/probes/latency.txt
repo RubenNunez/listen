@@ -1,0 +1,19 @@
+# Repeatable synthetic latency probe. Four questions separated by quiet gaps.
+A: Hallo, ich bin Anna. Wir sprechen heute über Informatik.
+--
+A: Was ist der Unterschied zwischen einem Prozess und einem Thread?
+--
+--
+--
+B: Wie viele Sekunden hat eine Stunde?
+--
+--
+--
+A: Wie funktioniert eine Hashtabelle?
+--
+--
+--
+B: Wie verhindert man SQL-Injection?
+--
+--
+--

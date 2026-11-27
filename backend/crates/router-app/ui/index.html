@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Listen Router</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="orb" id="orb"><canvas></canvas></div>
+    <h1>Listen Router</h1>
+    <p class="status" id="status"><span class="dot"></span><span id="status-text">starting…</span></p>
+    <p class="problem" id="problem" hidden></p>
+    <nav class="tabs" role="tablist">
+      <button type="button" role="tab" data-tab="overview" aria-selected="true">Overview</button>
+      <button type="button" role="tab" data-tab="topics" aria-selected="false">Topics</button>
+      <button type="button" role="tab" data-tab="settings" aria-selected="false">Settings</button>
+    </nav>
+  </header>
+
+  <main>
+    <div class="pane" id="pane-overview">
+      <section id="pair-section">
+        <h2>Pair a device</h2>
+        <div class="pair">
+          <!-- The box keeps its size in every phase: code, stopped, paired. -->
+          <div class="qr-box" id="qr-box" data-phase="none">
+            <div class="qr" id="qr" role="img" aria-label="QR code for pairing"></div>
+            <div class="qr-stopped" id="qr-stopped">
+              <span class="tick" id="qr-tick" aria-hidden="true"></span>
+              <button id="show-code" type="button" class="primary">Show a new code</button>
+            </div>
+            <div class="timer" id="timer" aria-hidden="true"><i></i></div>
+          </div>
+          <div class="how">
+            <ol>
+              <li>Point your iPhone's camera at the code.</li>
+              <li>Open the link in Listen and tap “Pair this device”.</li>
+            </ol>
+            <p class="muted small">On a Mac, copy the link and paste it into Listen. Both devices must be in this network or its VPN.</p>
+          </div>
+        </div>
+        <div class="row">
+          <span class="muted small grow" id="left" role="status"></span>
+          <button id="copy" type="button">Copy link</button>
+        </div>
+        <p class="fingerprint muted" id="fingerprint-row" hidden>Listen shows this fingerprint before it pairs: <span id="fingerprint"></span></p>
+      </section>
+
+      <section id="devices-section">
+        <h2>Paired devices</h2>
+        <ul class="list" id="devices"></ul>
+      </section>
+
+      <section id="tools-section">
+        <h2>AI tools on this computer</h2>
+        <ul class="list" id="tools"></ul>
+      </section>
+
+      <section id="activity-section">
+        <details id="activity-box">
+          <summary><h2>Activity</h2><span class="muted" id="sessions-count"></span></summary>
+          <ul class="activity" id="activity"></ul>
+        </details>
+      </section>
+    </div>
+
+    <div class="pane" id="pane-topics" hidden>
+      <section>
+        <h2>Topics</h2>
+        <p class="muted small">Each topic is a folder. Its sessions read and write there; the apps create topics when a conversation starts.</p>
+        <ul class="topics" id="topics"></ul>
+      </section>
+    </div>
+
+    <div class="pane" id="pane-settings" hidden>
+      <form id="settings-form">
+        <section>
+          <h2>Folders</h2>
+          <label class="field"><span>Router folder</span>
+            <span class="path-row"><input id="s-folder" readonly><button type="button" data-open="router">Open</button></span>
+            <small class="muted">Holds router.toml, the certificate and the topics. To move it, start the router with --home or LISTEN_ROUTER_HOME.</small>
+          </label>
+          <label class="field"><span>Topics folder</span>
+            <span class="path-row"><input id="s-topics-root" placeholder="topics in the router folder"><button type="button" data-choose="s-topics-root">Choose…</button></span>
+          </label>
+        </section>
+
+        <section>
+          <h2>AI tools</h2>
+          <div class="tool" data-tool="claude"></div>
+          <div class="tool" data-tool="codex"></div>
+        </section>
+
+        <section>
+          <h2>Limits</h2>
+          <div class="grid">
+            <label class="field"><span>Sessions per topic</span><input type="number" min="1" id="s-per-topic"></label>
+            <label class="field"><span>Sessions in total</span><input type="number" min="1" id="s-total"></label>
+            <label class="field"><span>Idle after (s)</span><input type="number" min="10" id="s-idle"></label>
+            <label class="field"><span>Silence limit (s)</span><input type="number" min="5" id="s-silence"></label>
+          </div>
+        </section>
+
+        <section>
+          <h2>Network and start</h2>
+          <label class="field"><span>Port</span><input type="number" min="1" max="65535" id="s-port"></label>
+          <label class="check"><input type="checkbox" id="s-bonjour"> Announce at home by Bonjour (so a Mac finds it)</label>
+          <label class="check"><input type="checkbox" id="s-autostart"> Start with the system, in the tray</label>
+        </section>
+
+        <div class="row sticky">
+          <span class="muted" id="settings-note"></span>
+          <span class="grow"></span>
+          <button type="button" id="settings-reset">Undo changes</button>
+          <button type="submit" class="primary">Save</button>
+        </div>
+      </form>
+    </div>
+
+    <footer class="muted" id="footer"></footer>
+  </main>
+
+  <dialog id="confirm">
+    <h2>Allow more?</h2>
+    <p>These settings let sessions do more than before:</p>
+    <ul id="confirm-list"></ul>
+    <p class="muted small">Text that reaches a session, heard in a conversation or found on the web, could lead it to use what you allow here.</p>
+    <div class="row">
+      <span class="grow"></span>
+      <button type="button" id="confirm-no">Cancel</button>
+      <button type="button" id="confirm-yes" class="danger">Allow and save</button>
+    </div>
+  </dialog>
+
+  <script src="orb.js"></script>
+  <script src="app.js"></script>
+  <script src="settings.js"></script>
+</body>
+</html>

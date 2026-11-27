@@ -1,0 +1,39 @@
+# A second German set, written after the gate's wording was fixed and never used to tune it.
+
+NONE
+Hast du die Schlüssel eingesteckt?
+
+NONE
+Mir ist heute irgendwie kalt.
+Soll ich das Fenster zumachen?
+
+NONE
+Hallo, hörst du mich?
+
+NONE
+Wir treffen uns dann morgen um zehn, passt das?
+Ja, passt.
+
+NONE
+Das Essen war wirklich lecker.
+
+CARD
+Was ist eigentlich ein Stimmabdruck?
+
+CARD
+Wie viele Einwohner hat Zürich?
+
+CARD
+Erklär mir bitte kurz, was OAuth ist.
+
+CARD
+Seit wann gibt es eigentlich das iPhone?
+
+CARD
+Ich weiss nie, was der Unterschied zwischen Brutto und Netto ist.
+
+NONE
+Kannst du mir das Salz geben?
+
+CARD
+Schreib mir eine kurze Zusammenfassung über die Französische Revolution.

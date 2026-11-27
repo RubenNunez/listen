@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "scope": "Reference written from the public synthetic scripts before meeting evaluation. Coverage is by question area, not a required number of rows. Assistant answers are not participant agreement.",
+  "market-meeting": {
+    "language": "de",
+    "decisions": [],
+    "committed_tasks": [],
+    "explicit_owners_or_deadlines": [],
+    "open_points": [
+      "iOS and Android market shares in Germany",
+      "Comparison with Switzerland",
+      "App Store commission and reduced small-developer rate",
+      "Net monthly proceeds from one thousand subscribers at five francs",
+      "Churn rate definition and an appropriate subscription-app value",
+      "German VAT on digital services"
+    ],
+    "caution": "Considering market entry is not an adopted decision. Acknowledging that VAT affects pricing does not assign someone a task."
+  },
+  "design-review": {
+    "language": "en",
+    "decisions": [],
+    "committed_tasks": [],
+    "explicit_owners_or_deadlines": [],
+    "open_points": [
+      "At-least-once versus exactly-once delivery",
+      "Idempotent consumers and duplicate handling",
+      "Required worker count for 2000 messages per second and 50 milliseconds",
+      "Python retry with exponential backoff and jitter",
+      "Requested client/API/queue/worker SVG diagram",
+      "Amazon SQS message-size and retention limits"
+    ],
+    "caution": "A proposed queue architecture is not explicit adoption. Requests for an immediate explanation or example are not assigned team tasks. Weekend chatter is excluded."
+  },
+  "architecture-review": {
+    "language": "de",
+    "decisions": [],
+    "committed_tasks": [],
+    "explicit_owners_or_deadlines": [],
+    "open_points": [
+      "At-least-once versus exactly-once delivery",
+      "Idempotent consumers and duplicate handling",
+      "Required worker count for 2000 messages per second and 50 milliseconds",
+      "Python retry with exponential backoff and jitter",
+      "Requested client/API/queue/worker SVG diagram",
+      "Amazon SQS message-size and retention limits"
+    ],
+    "caution": "The final suggestion to check SQS limits before committing does not state an owner or deadline. Weekend chatter is excluded."
+  }
+}

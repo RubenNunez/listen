@@ -1,0 +1,33 @@
+name: Bug report
+description: Report a reproducible Listen problem using non-private examples.
+body:
+  - type: markdown
+    attributes:
+      value: "Use synthetic examples. Do not upload private recordings, transcripts, keys, pairing codes or account data. Report security issues privately through SECURITY.md."
+  - type: input
+    id: version
+    attributes:
+      label: Source revision and device
+      placeholder: "Commit or tag, OS/Xcode version, device type"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction
+      description: "Include relevant model/voice names and synthetic steps, without account identifiers or secrets."
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and observed behavior
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy
+      options:
+        - label: "I checked that this report contains no private recordings, credentials or other people's data."
+          required: true

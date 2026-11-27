@@ -1,0 +1,14 @@
+# Several questions about one thing, then another thing: one block that grows, then a second block.
+A: Hallo, ich bin Anna. Wir schneiden heute Karten mit dem Cricut Joy.
+B: Hallo Anna, ich bin Markus. Drei von vier Karten sind schon fertig.
+--
+A: Der Cricut Joy hat ja auch eine Klinge, oder? Kann man die Klinge ersetzen?
+--
+B: Und gibt es Angaben, wie oft man die Klinge wechseln sollte?
+--
+A: Was kostet eigentlich eine Ersatzklinge für den Cricut Joy?
+--
+B: Anderes Thema. Wie lange braucht Sekundenkleber, bis er ganz ausgehärtet ist?
+! blocks 2
+! expect Klinge | austauschbar
+! expect Sekundenkleber

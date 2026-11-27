@@ -1,0 +1,27 @@
+# Two engineers review the design of a notification service. Covers: a definition, a growing
+# block, a formula, code, a drawing, a number that needs the web, small talk, a change of thing.
+A: Hallo, ich bin Anna. Danke, dass du dir Zeit für das Review nimmst.
+B: Hallo Anna, ich bin Markus. Gern, zeig mal, was ihr für den Benachrichtigungsdienst geplant habt.
+--
+A: Wir wollen die Nachrichten über eine Warteschlange verteilen. Was ist eigentlich der Unterschied zwischen At-least-once und Exactly-once Zustellung?
+B: Gute Frage. Und wie macht man einen Empfänger idempotent, damit doppelte Nachrichten nicht schaden?
+--
+A: Wir rechnen mit zweitausend Nachrichten pro Sekunde, jede braucht im Schnitt fünfzig Millisekunden. Wie viele Worker brauchen wir dann mindestens?
+--
+B: Kannst du mir zeigen, wie man in Python einen Retry mit exponentiellem Backoff und Jitter schreibt?
+--
+A: Zeichne bitte ein einfaches Diagramm als SVG: Client, API, Warteschlange und Worker als Kästen mit Pfeilen dazwischen.
+--
+B: Übrigens, hast du am Wochenende das Spiel gesehen?
+A: Nein, ich war mit den Kindern im Zoo. War aber schön.
+--
+B: Zurück zum Thema. Welche maximale Nachrichtengrösse erlaubt Amazon SQS, und wie lange werden Nachrichten dort höchstens aufbewahrt?
+A: Das sollten wir prüfen, bevor wir uns festlegen.
+! blocks 5
+! expect At-least-once | Exactly-once
+! expect idempot
+! expect 100 | Worker
+! expect ```python | sleep
+! expect <svg | <rect
+! expect SQS | Tage
+! silent Zoo

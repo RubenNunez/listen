@@ -1,0 +1,8 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "A Swift crypto type declaration, without a value or credential."
+targetRules = ["generic-api-key"]
+regexTarget = "line"
+regexes = ['''^\s*let privateKey: Curve25519\.KeyAgreement\.PrivateKey\s*$''']

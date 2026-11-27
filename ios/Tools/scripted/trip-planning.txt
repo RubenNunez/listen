@@ -1,0 +1,22 @@
+# Two friends plan a hiking weekend. Everyday talk: facts, a follow-up on the same thing,
+# a quick calculation, things that deserve no card, and a new thing at the end.
+A: Hey, ich bin Anna. Wollen wir am Wochenende endlich die Wanderung machen?
+B: Hallo Anna, hier ist Markus. Ja, unbedingt, ich habe an den Säntis gedacht.
+--
+A: Wie hoch ist der Säntis eigentlich?
+B: Und wie lange braucht man zu Fuss von der Schwägalp auf den Gipfel?
+--
+A: Fährt da nicht auch eine Seilbahn hoch? Was kostet die Fahrt?
+--
+B: Ich bringe Sandwiches mit. Magst du lieber Käse oder Schinken?
+A: Käse, bitte. Und ich nehme Tee mit.
+--
+B: Wenn wir vier Stunden gehen und pro Stunde etwa einen halben Liter trinken, wie viel Wasser brauchen wir zu zweit?
+--
+A: Noch etwas anderes. Ab welcher Höhe muss man eigentlich mit Höhenkrankheit rechnen?
+! blocks 3
+! expect Säntis | 2.50
+! expect Schwägalp
+! expect 4 Liter
+! expect Höhenkrankheit | Meter
+! silent Sandwiches

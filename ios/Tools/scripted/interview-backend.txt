@@ -1,0 +1,28 @@
+# A job interview for a backend engineer. A: interviewer, B: candidate. "--" is a longer pause.
+A: Guten Tag, ich bin Anna. Schön, dass Sie heute da sind.
+B: Guten Tag Anna, ich bin Markus. Danke für die Einladung.
+--
+A: Erzählen Sie kurz, woran Sie zuletzt gearbeitet haben.
+B: Ich habe einen Zahlungsdienst gebaut, der etwa zweitausend Anfragen pro Sekunde verarbeitet. Wir haben dafür PostgreSQL und Kafka eingesetzt.
+--
+A: Welche Datenbanken werden heute eigentlich am häufigsten eingesetzt? Wissen Sie, wie die Verteilung zwischen PostgreSQL, MySQL und MongoDB aussieht?
+B: Soweit ich weiss, liegt PostgreSQL bei Entwicklern inzwischen vorne, aber die genauen Zahlen habe ich nicht im Kopf.
+--
+A: Kommen wir zur Verfügbarkeit. Was bedeutet eine Verfügbarkeit von vier Neunen, und wie viel Ausfallzeit ist das pro Jahr?
+B: Vier Neunen sind neunundneunzig Komma neun neun Prozent. Wie man das genau in Minuten umrechnet, müsste ich kurz überlegen.
+--
+A: Dann eine praktische Frage. Wie würden Sie in Python einen LRU Cache schreiben?
+B: Am einfachsten mit einem geordneten Dictionary. Bei jedem Zugriff schiebe ich den Schlüssel ans Ende, und wenn der Cache voll ist, entferne ich den ältesten Eintrag.
+--
+A: Übrigens, sind Sie gut hergekommen? Der Verkehr war heute Morgen schlimm.
+B: Ja, danke, ich bin mit dem Zug gekommen, das ging problemlos.
+--
+A: Zum Schluss noch ein Begriff. Was sagt das CAP Theorem aus?
+B: Dass ein verteiltes System bei einer Netzwerkpartition zwischen Konsistenz und Verfügbarkeit wählen muss.
+A: Sehr gut. Vielen Dank, Markus, wir melden uns bis Ende Woche.
+! blocks 4
+! expect PostgreSQL | MySQL | MongoDB
+! expect 99,99 | Minuten
+! expect LRU | OrderedDict
+! expect CAP | Konsistenz | Verfügbarkeit
+! silent Verkehr

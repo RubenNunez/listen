@@ -1,0 +1,133 @@
+syntax = "proto3";
+package listen.router.v1;
+
+// The contract between the Listen apps and the Listen Router.
+// Every call except Pair carries metadata "authorization: Bearer <device token>".
+service Router {
+  rpc Pair(PairRequest) returns (PairResponse);
+  rpc Status(StatusRequest) returns (StatusResponse);
+  rpc OpenSession(OpenSessionRequest) returns (OpenSessionResponse);
+  rpc Deliver(DeliverRequest) returns (DeliverResponse);
+  rpc Ask(AskRequest) returns (stream AskEvent);
+  rpc CloseSession(CloseSessionRequest) returns (CloseSessionResponse);
+}
+
+enum Tool {
+  TOOL_UNSPECIFIED = 0;
+  TOOL_CLAUDE = 1;
+  TOOL_CODEX = 2;
+}
+
+enum SignedIn {
+  SIGNED_IN_UNKNOWN = 0;
+  SIGNED_IN_YES = 1;
+  SIGNED_IN_NO = 2;
+}
+
+message PairRequest {
+  string code = 1;
+  string device_name = 2;
+}
+message PairResponse {
+  string device_token = 1;
+  string router_name = 2;
+}
+
+message StatusRequest {}
+message ToolStatus {
+  Tool tool = 1;
+  bool found = 2;
+  string version = 3;
+  bool enabled = 4;
+  SignedIn signed_in = 5;
+}
+message Limits {
+  uint32 sessions_per_topic = 1;
+  uint32 sessions_total = 2;
+  uint32 idle_seconds = 3;
+  uint32 silence_seconds = 4;
+}
+message SessionInfo {
+  string session_id = 1;
+  string topic_id = 2;
+  string role = 3;
+  Tool tool = 4;
+  string model = 5;
+  bool open = 6;
+}
+message StatusResponse {
+  string router_version = 1;
+  repeated ToolStatus tools = 2;
+  Limits limits = 3;
+  repeated SessionInfo sessions = 4;
+}
+
+message OpenSessionRequest {
+  string topic_id = 1;
+  string role = 2;
+  Tool tool = 3;
+  // The CLI's model name or alias, for example "haiku".
+  string model = 4;
+  // System text; used only when the session is new.
+  string system = 5;
+  // Empty: new session. Set: continue this stored session.
+  string session_id = 6;
+}
+message OpenSessionResponse {
+  string session_id = 1;
+  bool continued = 2;
+}
+
+message DeliverRequest {
+  string session_id = 1;
+  string text = 2;
+}
+message DeliverResponse {
+  // Deliveries held for the next question.
+  uint32 waiting = 1;
+}
+
+message AskRequest {
+  string session_id = 1;
+  string text = 2;
+}
+message AskEvent {
+  oneof kind {
+    // A piece of the reply.
+    string text = 1;
+    Step step = 2;
+    // Address of a web page the session used.
+    string source = 3;
+    Usage usage = 4;
+    End end = 5;
+    // Last event of a failed question.
+    Failure failure = 6;
+  }
+}
+// detail: a file path relative to the topic folder, or a search query.
+message Step {
+  string tool = 1;
+  string detail = 2;
+}
+message Usage {
+  double cost_usd = 1;
+  uint64 input_tokens = 2;
+  uint64 output_tokens = 3;
+}
+message End {}
+enum FailureKind {
+  FAILURE_KIND_UNSPECIFIED = 0;
+  FAILURE_KIND_CANCELLED = 1;
+  FAILURE_KIND_SILENT = 2;
+  FAILURE_KIND_LIMIT = 3;
+  FAILURE_KIND_TOOL = 4;
+}
+message Failure {
+  FailureKind kind = 1;
+  string message = 2;
+}
+
+message CloseSessionRequest {
+  string session_id = 1;
+}
+message CloseSessionResponse {}

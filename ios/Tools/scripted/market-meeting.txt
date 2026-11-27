@@ -1,0 +1,21 @@
+# A founder and an advisor talk about entering a market. Covers: current numbers with a chart,
+# several questions about one thing, a comparison, a percentage to work out, a term, a new thing.
+A: Guten Morgen, ich bin Anna. Wir überlegen, mit unserer App nach Deutschland zu gehen.
+B: Guten Morgen Anna, ich bin Markus. Dann schauen wir uns zuerst den Markt an.
+--
+A: Wie hoch ist eigentlich der Marktanteil von iOS und Android bei Smartphones in Deutschland?
+B: Und wie sieht das im Vergleich zur Schweiz aus?
+--
+A: Unsere App kostet fünf Franken im Monat. Welche Provision nimmt Apple im App Store, und gibt es einen reduzierten Satz für kleine Entwickler?
+B: Und wie viel bleibt uns dann von tausend Abonnenten pro Monat?
+--
+A: Was bedeutet eigentlich Churn Rate, und was wäre ein guter Wert für eine Abo-App?
+--
+B: Anderes Thema. Welche Mehrwertsteuer gilt in Deutschland für digitale Dienstleistungen?
+A: Stimmt, das müssen wir in den Preis einrechnen.
+! blocks 4
+! expect iOS | Android | Deutschland
+! expect ```chart
+! expect Provision | 15
+! expect Churn
+! expect 19 | Mehrwertsteuer

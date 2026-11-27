@@ -1,0 +1,28 @@
+Listen
+Copyright 2026 Ruben Nuñez and the Listen contributors
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Listen builds on libraries and models made by others. They keep their own
+licenses; what each is and what it asks for is listed in THIRD_PARTY.md.
+The speech and speaker models are downloaded at first use and are not part
+of this source distribution. The speaker models are by Argmax, Inc.,
+published under CC BY 4.0 (huggingface.co/argmaxinc/speakerkit-coreml).
+The Pocket TTS voice model is by Kyutai, published under CC BY 4.0
+(huggingface.co/kyutai/pocket-tts), converted to Core ML by FluidInference
+(huggingface.co/FluidInference/pocket-tts-coreml). It is downloaded on
+request and is not part of this source distribution.
+
+The optional Supertonic 3 voice model is by Supertone, converted to Core ML
+by FluidInference (huggingface.co/FluidInference/supertonic-3-coreml).
+It is downloaded on request, not included in this source distribution.
+Its use and distribution are governed by the BigScience Open RAIL-M
+license dated August 18, 2022, including the use restrictions in paragraph
+5 and Attachment A. A full copy is in
+ios/Listen/Resources/Supertonic3License.txt and the app's licenses view.
+
+The "Elevator music" waiting sound is "Local Forecast - Slower" by Kevin
+MacLeod (incompetech.com), licensed under Creative Commons: By Attribution
+4.0 License (creativecommons.org/licenses/by/4.0/). The app contains its
+first 20 seconds, changed to mono at 24 kHz, faded in and out, and plays it
+quieter (ios/Listen/Resources/ElevatorMusic.m4a).

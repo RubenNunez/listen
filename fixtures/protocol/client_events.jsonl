@@ -1,0 +1,9 @@
+{"type":"hello","protocol_version":1}
+{"type":"start","language":"de","context_version":7}
+{"type":"pause","reason":"app_speaking"}
+{"type":"resume"}
+{"type":"stop"}
+{"type":"help_now"}
+{"type":"card_action","generation_id":3,"action":"technical_detail"}
+{"type":"map_speaker","voice":2,"is_me":true}
+{"type":"resume_from","last_server_seq":41}
