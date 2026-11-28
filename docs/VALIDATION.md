@@ -142,6 +142,15 @@ instructions are never narrated. Generic Home Assistant on/off tools require a n
 explicit domain when their schema offers a domain array; execution supplies no guessed
 device type or all-device default.
 
+A single validated title candidate is presented as a clarification, rather than a
+service failure or a playback confirmation. A structured `episode_unavailable` result
+with `playback_started: false` explains that the requested selection is unavailable;
+it never retries or selects another episode. Two synthetic regression cases reproduced
+the generic-error fallthrough before these changes. All eleven receipt checks passed
+afterwards, including hostile service speech, invalid title/year data and conflicting
+or missing playback flags. This follow-up is source-tested and is not deployed in the
+installed build 57.
+
 If an observation changes during generation, a buffered answer is regenerated from the
 new facts at most once before speaking or proposing operations. Direct answers that
 start while a native operation is pending are buffered through model completion for this
