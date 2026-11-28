@@ -45,6 +45,45 @@ final class AudioCapture {
     private var continuation: AsyncStream<Captured>.Continuation?
     private var delivery: Task<Void, Never>?
     private(set) var isRunning = false
+    private(set) var isMuted = false
+    private var deliveryEpoch = 0
+
+    /// Remove the capture tap and its queued frames, leaving the shared output engine
+    /// alive for speech. This is app input muting, not a hardware microphone power switch.
+    func setMuted(_ muted: Bool) throws {
+        guard isMuted != muted else { return }
+        if muted {
+            isMuted = true
+            deliveryEpoch += 1
+        }
+        if Self.scriptedFile == nil {
+            #if !targetEnvironment(simulator)
+            if !Self.physicalInputDisabled {
+                if muted, isRunning {
+                    engine.inputNode.removeTap(onBus: 0)
+                    continuation?.finish(); continuation = nil
+                    delivery?.cancel(); delivery = nil
+                }
+                do {
+                    // Install behind the still-closed delivery gate before unmuting.
+                    if !muted, isRunning { try installCaptureTap() }
+                    try AVAudioApplication.shared.setInputMuted(muted)
+                    if voiceProcessingActive { engine.inputNode.isVoiceProcessingInputMuted = muted }
+                } catch {
+                    if isRunning { engine.inputNode.removeTap(onBus: 0) }
+                    deliveryEpoch += 1
+                    continuation?.finish(); continuation = nil
+                    delivery?.cancel(); delivery = nil
+                    try? AVAudioApplication.shared.setInputMuted(true)
+                    if voiceProcessingActive { engine.inputNode.isVoiceProcessingInputMuted = true }
+                    isMuted = true
+                    throw error
+                }
+            }
+            #endif
+        }
+        isMuted = muted
+    }
 
     init() {
         let center = NotificationCenter.default
@@ -141,8 +180,10 @@ final class AudioCapture {
                     var frame = sound.subdata(in: position..<min(position + WireProtocol.frameBytes, sound.count))
                     if frame.count < WireProtocol.frameBytes { frame.append(Data(count: WireProtocol.frameBytes - frame.count)) }
                     position += WireProtocol.frameBytes
-                    self?.onWaveform?(Waveform.shape(of: frame))
-                    self?.onFrame?(frame)
+                    if self?.isMuted == false {
+                        self?.onWaveform?(Waveform.shape(of: frame))
+                        self?.onFrame?(frame)
+                    }
                 }
                 if !Task.isCancelled { self?.onScriptEnded?() }
                 // A room goes quiet after the last word; it does not stop existing. Without the
@@ -151,7 +192,7 @@ final class AudioCapture {
                     index += 1
                     try? await clock.sleep(until: began + .milliseconds(100 * index))
                     if Task.isCancelled { return }
-                    self?.onFrame?(Data(count: WireProtocol.frameBytes))
+                    if self?.isMuted == false { self?.onFrame?(Data(count: WireProtocol.frameBytes)) }
                 }
             }
             isRunning = true
@@ -168,8 +209,10 @@ final class AudioCapture {
                 if Task.isCancelled { return }
                 index += 1
                 let frame = Self.simulatedFrame(index)
-                self?.onWaveform?(Waveform.shape(of: frame))
-                self?.onFrame?(frame)
+                if self?.isMuted == false {
+                    self?.onWaveform?(Waveform.shape(of: frame))
+                    self?.onFrame?(frame)
+                }
             }
         }
         isRunning = true
@@ -194,7 +237,7 @@ final class AudioCapture {
         }
         if voiceConversation {
             input.isVoiceProcessingBypassed = false
-            input.isVoiceProcessingInputMuted = false
+            input.isVoiceProcessingInputMuted = isMuted
             input.isVoiceProcessingAGCEnabled = true
             input.voiceProcessingOtherAudioDuckingConfiguration = .init(enableAdvancedDucking: false, duckingLevel: .min)
             // VPIO needs a running output reference even before the first reply.
@@ -217,20 +260,10 @@ final class AudioCapture {
             // initialization (-10875) on the built-in Mac route.
             engine.connect(mixer, to: output, format: format)
         }
-        let format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, let chunker = PCMChunker(inputFormat: format) else {
-            throw CaptureError.noInput
-        }
-        let (stream, continuation) = AsyncStream.makeStream(of: Captured.self, bufferingPolicy: .bufferingNewest(120))
-        // A tap left from before would make installing this one raise; nil takes the format the
-        // input has now, which can differ from what was read a moment ago while headphones
-        // switch their profile (a crash at the start of a call, 18 November 2026).
-        input.removeTap(onBus: 0)
-        input.installTap(
-            onBus: 0, bufferSize: 1600, format: nil,
-            block: Self.makeTap(chunker: chunker, continuation: continuation))
+        try AVAudioApplication.shared.setInputMuted(isMuted)
+        if !isMuted { try installCaptureTap() }
         RunRecorder.assistantOutput?.log("voice_capture_configuration", [
-            "input_format": format.description,
+            "input_format": input.outputFormat(forBus: 0).description,
             "output_format": engine.outputNode.inputFormat(forBus: 0).description,
             "voice_processing_requested": voiceConversation])
         engine.prepare()
@@ -238,12 +271,8 @@ final class AudioCapture {
             try engine.start()
         } catch {
             input.removeTap(onBus: 0)
-            continuation.finish()
+            continuation?.finish()
             throw error
-        }
-        self.continuation = continuation
-        delivery = Task { [weak self] in
-            for await item in stream { self?.deliver(item) }
         }
         isRunning = true
         voiceProcessingActive = voiceConversation && input.isVoiceProcessingEnabled
@@ -252,7 +281,27 @@ final class AudioCapture {
         reportHeadphones()
     }
 
+    private func installCaptureTap() throws {
+        let input = engine.inputNode
+        let format = input.outputFormat(forBus: 0)
+        guard format.sampleRate > 0, let chunker = PCMChunker(inputFormat: format) else { throw CaptureError.noInput }
+        let (stream, continuation) = AsyncStream.makeStream(of: Captured.self, bufferingPolicy: .bufferingNewest(120))
+        deliveryEpoch += 1
+        let epoch = deliveryEpoch
+        input.removeTap(onBus: 0)
+        input.installTap(onBus: 0, bufferSize: 1600, format: nil,
+                         block: Self.makeTap(chunker: chunker, continuation: continuation))
+        self.continuation = continuation
+        delivery = Task { [weak self] in
+            for await item in stream {
+                guard let self, self.deliveryEpoch == epoch, !Task.isCancelled else { return }
+                self.deliver(item)
+            }
+        }
+    }
+
     private func deliver(_ item: Captured) {
+        guard isRunning, !isMuted else { return }
         switch item {
         case .frame(let frame): onFrame?(frame)
         case .waveform(let shape): onWaveform?(shape)
@@ -281,6 +330,7 @@ final class AudioCapture {
     func stop() {
         guard isRunning else { return }
         isRunning = false
+        deliveryEpoch += 1
         delivery?.cancel()
         delivery = nil
         if Self.scriptedFile != nil { return }

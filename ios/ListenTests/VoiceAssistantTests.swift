@@ -1806,6 +1806,62 @@ private actor WorkWireDouble {
         #expect(speaker.spoken[1].0 == "Die ausführliche Antwort folgt jetzt.")
     }
 
+    @Test func thanksDoesNotCancelPendingRequestButSubstantiveCorrectionDoes() async throws {
+        let (session, model, _, _) = try setup(withTools: false)
+        defer { session.stop() }
+        await model.configure(output: "Eine synthetische Antwort.", suspended: true)
+        try await wait { session.ready }
+        session.submit("Bitte antworte auf Deutsch und erkläre die Auswahl.")
+        try await wait { session.thinking }
+        for _ in 0..<100 { if await model.waitingForCompletion { break }; await Task.yield() }
+        session.receive(heard(91, "Thank", final: false))
+        session.receive(heard(91, "Thank you.", final: true, revision: 2))
+        #expect(session.thinking && session.modelRequests == 1)
+        session.receive(heard(92, "Nein, ich meinte die andere Auswahl.", final: true))
+        try await wait { session.modelRequests == 2 }
+        #expect(!VoiceAssistantSession.isWorkBackchannel(["Danke", "aber", "nein"]))
+        #expect(!VoiceAssistantSession.isWorkBackchannel(["Stopp"]))
+    }
+
+    @Test func microphoneMuteKeepsGenerationAndPlaybackAlive() async throws {
+        let (session, model, speaker, _) = try setup(withTools: false)
+        defer { session.stop() }
+        await model.configure(output: "Die Antwort läuft weiter.", suspended: true)
+        session.setDuplexListening(true)
+        try await wait { session.ready }
+        session.submit("Erkläre das bitte.")
+        for _ in 0..<100 { if await model.waitingForCompletion { break }; await Task.yield() }
+        session.setMicrophoneMuted(true)
+        session.receive(heard(93, "Neue Frage.", final: true))
+        #expect(session.microphoneMuted && !session.paused && session.thinking && session.modelRequests == 1)
+        await model.finish()
+        try await wait { session.audible }
+        let stops = speaker.stops
+        session.microphoneActivity(speechSeconds: 2, quietSeconds: 0)
+        session.receive(heard(94, "Stopp.", final: true))
+        #expect(session.audible && speaker.stops == stops && !session.hearing)
+        session.setMicrophoneMuted(false)
+        session.receive(heard(95, "Eine andere richtige Frage.", final: true))
+        try await wait { session.modelRequests == 2 }
+    }
+
+    @Test func identicalPendingPermissionIsShownOnceAndDispatchesOnce() async throws {
+        let (session, _, _, wire) = try setup()
+        defer { session.stop() }
+        try await wait { session.ready }
+        session.submit("Turn on the synthetic lamp.")
+        try await wait { session.pending.count == 1 }
+        let first = try #require(session.pending.first)
+        session.submit("Turn on the same synthetic lamp.")
+        try await wait { session.modelRequests == 2 && !session.thinking }
+        #expect(session.pending.count == 1 && session.pending.first?.id == first.id)
+        #expect(await wire.calls == 0)
+        session.decide(first, allow: true)
+        try await wait { session.pending.isEmpty }
+        for _ in 0..<100 { if await wire.calls == 1 { break }; await Task.yield() }
+        #expect(await wire.calls == 1)
+    }
+
     @Test func aBackchannelDoesNotCutAnExplanationButACorrectionStillDoes() async throws {
         let (session, model, speaker, _) = try setup(withTools: false)
         defer { session.stop() }
@@ -2039,7 +2095,10 @@ private actor WorkWireDouble {
             try await wait { queued }
             #expect(await wire.calls == 1 && voice.stops == stops)
             #expect(voice.spoken.count == (alreadySpeaking ? 1 : 0))
-            if !alreadySpeaking { await model.finish() }
+            if !alreadySpeaking {
+                await model.configure(output: #"{"speech":"The explanation finishes before the tool report.","calls":[]}"#)
+                await model.finish()
+            }
             try await wait { !session.thinking && voice.spoken.count == 1 }
             #expect(voice.spoken[0].0 == "The explanation finishes before the tool report.")
             let reply = try #require(session.lastReplyID)
@@ -2048,6 +2107,40 @@ private actor WorkWireDouble {
             try await wait { voice.spoken.count == 2 }
             #expect(voice.spoken[1].0 == "The service has responded. Details are available in the app.")
             #expect(session.lastToolDetail == "Synthetic lamp acknowledged.")
+        }
+    }
+
+    @Test func newerToolReceiptRefreshesStaleReplyAndSurvivesInterruption() async throws {
+        for routedWithoutTools in [false, true] {
+            let router = VoicePlannerDouble()
+            await router.configure(tier: "luna", usesTools: true, usesWeb: false)
+            let (session, model, voice, wire) = try setup(adaptive: routedWithoutTools, reviewer: router)
+            defer { session.stop() }
+            try await wait { session.ready }
+            session.submit("Turn on the synthetic lamp.")
+            try await wait { session.pending.count == 1 && !session.thinking }
+            let action = try #require(session.pending.first)
+            if routedWithoutTools { await router.configure(tier: "luna", usesTools: false, usesWeb: false) }
+            await model.configure(output: routedWithoutTools ? "The action is still unconfirmed." : #"{"speech":"The action is still unconfirmed.","calls":[]}"#, suspended: true)
+            session.submit("Has that action finished?")
+            for _ in 0..<200 { if await model.waitingForCompletion { break }; await Task.yield() }
+            session.decide(action, allow: true)
+            try await wait { session.state.operation(action.id)?.state.wasDispatched == true && session.pending.isEmpty }
+            for _ in 0..<200 { if await wire.calls == 1 { break }; await Task.yield() }
+            try await wait { session.state.operation(action.id)?.state.isFinal == true }
+            await model.configure(output: routedWithoutTools ? "The observed action has finished." : #"{"speech":"The observed action has finished.","calls":[]}"#)
+            await model.finish()
+            try await wait { !session.thinking && voice.spoken.count == 1 }
+            #expect(voice.spoken[0].0 == "The observed action has finished.")
+            #expect(await model.inputs.last?.contains("observed_tool_result") == true)
+            #expect(await wire.calls == 1, "refreshing dialogue must not repeat the mutation")
+            session.interrupt()
+            await model.configure(output: routedWithoutTools ? "A new explanation." : #"{"speech":"A new explanation.","calls":[]}"#)
+            session.submit("Explain another topic.")
+            try await wait { voice.spoken.count == 2 }
+            voice.finished?(voice.spoken[1].1)
+            try await wait { voice.spoken.count == 3 }
+            #expect(voice.spoken[2].0 == "The service has responded. Details are available in the app.")
         }
     }
 

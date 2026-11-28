@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The talk screen: the orb, what it is doing, and the reply. Nothing to type and no
-/// buttons to manage the session: tap the orb to interrupt it or to carry on after a pause,
+/// microphone control: tap the orb to interrupt it or to carry on after a pause,
 /// and the cross ends the conversation and goes back.
 struct AssistantView: View {
     let model: SessionModel
@@ -37,6 +37,9 @@ struct AssistantView: View {
         // Said only on the provider's report of a search; the reply itself is not out yet.
         if assistant.researching { return "Searching the web · tap the orb to cancel" }
         if assistant.acknowledging { return "Preparing an answer · tap the orb to interrupt" }
+        if model.conversationMicrophoneMuted {
+            return assistant.language == .de ? "Mikrofon stumm · Antworten laufen weiter" : "Microphone muted · replies continue"
+        }
         if assistant.speaking {
             return assistant.listensWhileSpeaking ? "Listening · speak to interrupt" : assistant.audible ? "Speaking · tap the orb to interrupt" : "Preparing the voice"
         }
@@ -142,6 +145,7 @@ struct AssistantView: View {
                                    choose: { try assistant.chooseVoice($0) }, sample: { assistant.playSample() })
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .disabled(ended || !assistant.ready || model.core.phase == .starting || model.core.phase == .reconnecting)
+                microphoneButton
                 Button("End conversation", systemImage: "xmark", action: close)
                     .labelStyle(.iconOnly).buttonStyle(.glass).buttonBorderShape(.circle).controlSize(.large)
                     .accessibilityIdentifier("assistant.close")
@@ -158,6 +162,7 @@ struct AssistantView: View {
                 .frame(width: 44, height: 44)
                 .accessibilityIdentifier("assistant.close")
             Spacer()
+            microphoneButton
             ListenSettingsButton(identifier: "assistant.settings") { showsVoiceSettings = true }
             }
             .padding(.horizontal, 24).padding(.vertical, 8)
@@ -179,6 +184,10 @@ struct AssistantView: View {
             // Ended by the cross, or by saying stop: back to where the conversation began.
             if ended, problem == nil { model.send(.done) }
         }
+    }
+
+    private var microphoneButton: some View {
+        ConversationMicrophoneButton(model: model, language: assistant.language).disabled(ended)
     }
 
     /// What the provider reported for the last reply: the pages it cited, to open, and
@@ -408,4 +417,28 @@ private struct ReplyMoment: Hashable {
     var interrupted: Bool
     var speechCharacters: Int?
     var playbackEnded: Bool
+}
+
+/// The same explicit input control for assistant and card-based spoken sessions.
+struct ConversationMicrophoneButton: View {
+    let model: SessionModel
+    let language: Language
+    var identifier = "assistant.microphone"
+
+    var body: some View {
+        Button {
+            model.setConversationMicrophoneMuted(!model.conversationMicrophoneMuted)
+        } label: {
+            Image(systemName: model.conversationMicrophoneMuted ? "mic.slash.fill" : "mic.fill")
+                .frame(width: 44, height: 44)
+        }
+        .buttonStyle(.glass).buttonBorderShape(.circle)
+        .tint(model.conversationMicrophoneMuted ? .orange : .primary)
+        .accessibilityLabel(language == .de ? "Mikrofon" : "Microphone")
+        .accessibilityValue(model.conversationMicrophoneMuted ? (language == .de ? "Stumm" : "Muted") : (language == .de ? "An" : "On"))
+        .accessibilityHint(model.conversationMicrophoneMuted
+            ? (language == .de ? "Mikrofon einschalten" : "Unmute microphone")
+            : (language == .de ? "Mikrofon stummschalten; Antworten und Werkzeuge laufen weiter" : "Mute microphone; replies and tools continue"))
+        .accessibilityIdentifier(identifier)
+    }
 }
