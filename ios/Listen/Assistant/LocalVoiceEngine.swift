@@ -485,6 +485,7 @@ struct TalkBackSettings: View {
 struct LocalVoiceNotice: View {
     let configuration: VoiceAssistantConfiguration
     var compact = false
+    var showsReadyLicense = true
     private let store = LocalVoice.shared
 
     var body: some View {
@@ -507,7 +508,7 @@ struct LocalVoiceNotice: View {
                 case .ready:
                     EmptyView()
                 }
-                if model.family == .supertonic { SupertonicLicenseNotice(compact: compact && LocalVoice.complete(model.id) != nil) }
+                if model.family == .supertonic, showsReadyLicense || LocalVoice.complete(model.id) == nil { SupertonicLicenseNotice(compact: compact && LocalVoice.complete(model.id) != nil) }
             }
         }
     }

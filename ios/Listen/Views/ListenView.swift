@@ -20,15 +20,9 @@ struct ListenView: View {
 
     /// The conversation is spoken: its state, the last words heard and the sentence being said
     /// are in `SpokenHarnessBar`, so the header and the feeds do not say them a second time.
-    /// Its voice and what answers are the first block of the cards (`SpokenHarnessDetails`).
+    /// Secondary configuration lives in the shared conversation settings sheet.
     private var spoken: SpokenHarness? { model.spoken }
-    private var showsHeaderControls: Bool {
-        #if targetEnvironment(macCatalyst)
-        true
-        #else
-        spoken == nil
-        #endif
-    }
+    private var showsHeaderControls: Bool { spoken == nil }
     /// The layout with what was heard as a sidebar.
     @State private var wide = false
     /// The height of the whole screen, with what the header and the controls take. The fixed
@@ -57,7 +51,6 @@ struct ListenView: View {
         .onGeometryChange(for: CGFloat.self) { $0.size.height.rounded() } action: { fullHeight = $0 }
         .animation(.smooth, value: showLayers)
         .animation(.smooth, value: showHeard)
-        #if !targetEnvironment(macCatalyst)
         .safeAreaInset(edge: .top, spacing: 0) {
             if spoken != nil {
                 HStack {
@@ -72,10 +65,12 @@ struct ListenView: View {
                 LiveVoiceSettings(configuration: spoken.configuration, language: model.core.language,
                     preview: spoken.preview, canSample: !spoken.paused,
                     canPreviewPulse: !spoken.speaking && !spoken.hearing,
-                    choose: { try spoken.chooseVoice($0) }, sample: { spoken.playSample() })
+                    choose: { try spoken.chooseVoice($0) }, sample: { spoken.playSample() },
+                    answeringSource: spoken.source,
+                    heardVisibility: wide ? $showHeard : nil, layerVisibility: model.isDemo ? nil : $showLayers,
+                    openTimeline: model.isDemo ? nil : { model.showsTimeline = true })
             }
         }
-        #endif
     }
 
     private var feed: some View {
@@ -192,6 +187,13 @@ struct ListenView: View {
                     Label("\(reason.explanation) Tap play to continue.", systemImage: "pause.circle.fill")
                         .foregroundStyle(.orange)
                         .glassBanner()
+                }
+                if let spoken {
+                    LocalVoiceNotice(configuration: spoken.configuration, compact: true, showsReadyLicense: false)
+                    if model.isRecording {
+                        Label("Recording on this device", systemImage: "record.circle")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 if let error = model.captureError {
                     Label(error, systemImage: "mic.slash.fill").foregroundStyle(.red).glassBanner()
@@ -379,10 +381,6 @@ private struct OutputFeed: View {
                     if model.spoken == nil {
                         SectionLabel(title: "Listen", note: "what fits the conversation, stays here", prominent: true)
                             .padding(.horizontal, CardMetrics.inset)
-                    }
-                    // Spoken: the voice and what answers scroll with the cards, not in the fixed header.
-                    if let spoken = model.spoken {
-                        SpokenHarnessDetails(model: model, spoken: spoken)
                     }
                     if cards.isEmpty, model.spoken != nil {
                         // What the conversation is doing is said above; here only what the cards are for.

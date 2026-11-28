@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// The talk screen: the orb, what it is doing, and the reply. Nothing to type and no
-/// microphone control: tap the orb to interrupt it or to carry on after a pause,
-/// and the cross ends the conversation and goes back.
+/// The talk screen: the orb, its state and the reply, without text entry.
+/// Interaction: tap the orb to interrupt it or to carry on after a pause. Microphone mute,
+/// conversation settings and the cross stay at the top; the cross ends the conversation.
 struct AssistantView: View {
     let model: SessionModel
     let assistant: VoiceAssistantSession
@@ -110,16 +110,6 @@ struct AssistantView: View {
                         .accessibilityIdentifier("assistant.localSequence")
                     }
                     sources
-                    if let detail = assistant.lastToolDetail {
-                        DisclosureGroup(assistant.language == .de ? "Technische Details" : "Technical details") {
-                            Text(Self.formatted(detail)).font(.caption.monospaced())
-                                .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.top, 8)
-                        }
-                        .font(.caption).foregroundStyle(.secondary)
-                        .accessibilityIdentifier("assistant.tool.details")
-                        .id(assistant.lastReplyID)
-                    }
                     notices
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -136,25 +126,6 @@ struct AssistantView: View {
         }
         .scrollBounceBehavior(.basedOnSize)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewport = $0 }
-        #if targetEnvironment(macCatalyst)
-        .safeAreaInset(edge: .top, spacing: 0) {
-            HStack(alignment: .top, spacing: 12) {
-                AssistantVoiceMenu(current: assistant.voice, language: assistant.language, preview: assistant.preview,
-                                   canSample: !assistant.paused,
-                                   canPreviewPulse: !assistant.speaking && !assistant.hearing,
-                                   choose: { try assistant.chooseVoice($0) }, sample: { assistant.playSample() })
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .disabled(ended || !assistant.ready || model.core.phase == .starting || model.core.phase == .reconnecting)
-                microphoneButton
-                Button("End conversation", systemImage: "xmark", action: close)
-                    .labelStyle(.iconOnly).buttonStyle(.glass).buttonBorderShape(.circle).controlSize(.large)
-                    .accessibilityIdentifier("assistant.close")
-            }
-            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-            .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 12)
-            .background(.bar)
-        }
-        #else
         .safeAreaInset(edge: .top, spacing: 0) {
             HStack {
             Button("End conversation", systemImage: "xmark", action: close)
@@ -173,9 +144,8 @@ struct AssistantView: View {
                 canPreviewPulse: !assistant.speaking && !assistant.hearing,
                 choose: { try assistant.chooseVoice($0) }, sample: { assistant.playSample() },
                 models: assistant.configuredModels, tools: assistant.tools.map { $0.capability.rawValue }.sorted(),
-                missingTools: assistant.missing)
+                missingTools: assistant.missing, technicalDetail: assistant.lastToolDetail)
         }
-        #endif
         .task(id: ReplyMoment(response: assistant.lastReplyID, text: assistant.lastReply, speaking: assistant.speaking, audible: assistant.audible, flowing: assistant.voiceFlowing, interrupted: assistant.replyWasInterrupted, speechCharacters: assistant.replySpeechCharacters, playbackEnded: assistant.replyPlaybackEnded)) {
             await fadeReply()
         }
@@ -222,7 +192,7 @@ struct AssistantView: View {
             Text("Web search is switched on for this system, but its model's connection cannot search. Replies come without it.")
                 .font(.caption).foregroundStyle(.orange)
         }
-        LocalVoiceNotice(configuration: assistant.configuration, compact: true)
+        LocalVoiceNotice(configuration: assistant.configuration, compact: true, showsReadyLicense: false)
         if case .server(.speechProvider) = model.core.notice {
             Text("Speech recognition is unavailable. Check the device's speech model and try again.").foregroundStyle(.orange)
         }
@@ -236,13 +206,6 @@ struct AssistantView: View {
             toolName: assistant.tools.first { $0.capability == request.capability }?.descriptor.name,
             language: assistant.language,
             allow: { remember in assistant.decide(request, allow: true, alwaysAllow: remember) }, deny: { assistant.decide(request, allow: false) })
-    }
-
-    private static func formatted(_ raw: String) -> String {
-        guard let value = try? JSONSerialization.jsonObject(with: Data(raw.utf8)),
-              let data = try? JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys]),
-              let text = String(data: data, encoding: .utf8) else { return raw }
-        return text
     }
 
     /// Shows the reply while its voice plays, flowing in at the pace of speech, and fades it

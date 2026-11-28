@@ -329,11 +329,12 @@ struct ListenSettingsButton: View {
         Button("Settings", systemImage: "gearshape", action: action)
             .labelStyle(.iconOnly).buttonStyle(.glass).buttonBorderShape(.circle).controlSize(.large)
             .frame(width: 44, height: 44)
+            .keyboardShortcut(",", modifiers: .command)
             .accessibilityIdentifier(identifier)
     }
 }
 
-/// Conversation controls live behind one settings button on a phone.
+/// Secondary conversation controls share one settings entry across devices.
 struct LiveVoiceSettings: View {
     let configuration: VoiceAssistantConfiguration
     let language: Language
@@ -345,6 +346,11 @@ struct LiveVoiceSettings: View {
     var models: [String: String] = [:]
     var tools: [String] = []
     var missingTools: [String] = []
+    var technicalDetail: String?
+    var answeringSource: String?
+    var heardVisibility: Binding<Bool>?
+    var layerVisibility: Binding<Bool>?
+    var openTimeline: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -363,6 +369,23 @@ struct LiveVoiceSettings: View {
                         }
                     }
                 }
+                if let answeringSource, !answeringSource.isEmpty {
+                    Section("What answers") {
+                        Text(answeringSource).accessibilityIdentifier("spoken.source")
+                    }
+                }
+                if heardVisibility != nil || layerVisibility != nil || openTimeline != nil {
+                    Section("Display") {
+                        if let heardVisibility { Toggle("Show what was heard", isOn: heardVisibility) }
+                        if let layerVisibility { Toggle("Show layers", isOn: layerVisibility) }
+                        if let openTimeline {
+                            Button("Open recording timeline", systemImage: "chart.bar.xaxis") {
+                                dismiss()
+                                openTimeline()
+                            }
+                        }
+                    }
+                }
                 Section("Tools in this topic") {
                     LabeledContent("Available", value: String(tools.count))
                     ForEach(tools, id: \.self) { Text($0).font(.caption) }
@@ -372,10 +395,24 @@ struct LiveVoiceSettings: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
+                if let technicalDetail {
+                    Section("Technical details") {
+                        Text(Self.formatted(technicalDetail)).font(.caption.monospaced())
+                            .textSelection(.enabled)
+                            .accessibilityIdentifier("assistant.tool.details")
+                    }
+                }
             }
             .navigationTitle("Conversation settings")
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
         .onDisappear { @Sendable [preview] in Task { @MainActor in preview.stop() } }
+    }
+
+    private static func formatted(_ raw: String) -> String {
+        guard let value = try? JSONSerialization.jsonObject(with: Data(raw.utf8)),
+              let data = try? JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else { return raw }
+        return text
     }
 }
