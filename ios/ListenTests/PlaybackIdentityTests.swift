@@ -50,6 +50,7 @@ import Testing
         #expect(speech(try receipt(title: "Demo Show – S02E03"))?.contains("läuft") == true)
         // Older adapters may omit player identity. That alone is not a contradiction.
         #expect(speech(try receipt(title: nil))?.contains("läuft") == true)
+        #expect(speech(try receipt(title: "An Episode Display Label"))?.contains("läuft") == true)
         let unrelated = try receipt(title: "Different Show – S02E03")
             .replacingOccurrences(of: "\"outcome\":\"playing\"", with: "\"outcome\":\"catalog\"")
         #expect(speech(unrelated)?.contains("Wiedergabe") == false)
@@ -71,5 +72,16 @@ import Testing
             #expect(speech(try correlated("Demo Show – S02E03", actual: actual))?.contains("nicht bestätigen") == true)
         }
         #expect(speech(try correlated("Demo Show – S01E01", actual: .string("new-playback")))?.contains("läuft") == false)
+        var object = try #require(JSONDecoder().decode(HarnessValue.self, from: Data(raw.utf8)).object)
+        var player = try #require(object["player"]?.object)
+        player["playback_id"] = .string("already-running")
+        object["player"] = .object(player)
+        object["outcome"] = .string("done")
+        object["playback_started"] = nil
+        let control = String(decoding: try JSONEncoder().encode(HarnessValue.object(object)), as: UTF8.self)
+        #expect(speech(control) == "Die Wiedergabe läuft.")
+        object["outcome"] = .string("playing")
+        let continuing = String(decoding: try JSONEncoder().encode(HarnessValue.object(object)), as: UTF8.self)
+        #expect(speech(continuing)?.contains("läuft") == true)
     }
 }

@@ -145,8 +145,10 @@ device type or all-device default.
 Playback receipts reject explicit conflicts between requested, selected and observed
 season/episode/year, media IDs and trailing `SxxExx` player-title markers. Matching
 stable media IDs permit display aliases but never override an episode conflict.
-If a receipt supplies a `playback_id`, the player must echo that ID; older adapters
-with neither ID remain supported. Conflicts produce an unconfirmed response, without
+If a receipt supplies a `playback_id`, the player must echo that ID. Status/control
+receipts may describe an existing player's ID without reserving a new start; older
+adapters with neither ID remain supported. Opaque display labels are not assumed to
+be series names. Conflicts produce an unconfirmed response, without
 retrying or dispatching anything. Five synthetic identity regressions and the existing
 receipt checks pass against the actual Foundation decoder, including the independent
 stale-player reproducer. No microphone, model, network or physical player is involved.

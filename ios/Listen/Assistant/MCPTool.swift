@@ -276,9 +276,10 @@ enum AssistantToolFeedback {
                   !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else { return nil }
             return value
         }
-        // A receipt that opts into playback correlation must supply a matching echo.
-        // Legacy receipts with neither ID are checked against the identity they do have.
-        if object["playback_id"] != nil || player["playback_id"] != nil {
+        // A start that opts into playback correlation must supply a matching echo.
+        // A status/control can describe an existing player's ID without reserving a
+        // new start of its own. Legacy receipts keep their available identity checks.
+        if object["playback_id"] != nil || (object["playback_started"] == .bool(true) && player["playback_id"] != nil) {
             guard let expected = identifier(object["playback_id"]),
                   let actual = identifier(player["playback_id"]), expected == actual else { return true }
         }
@@ -299,14 +300,15 @@ enum AssistantToolFeedback {
             }
         }
         if sameMedia { return false }
-        guard let selected = selection["series"]?.string,
-              let actual = parsed?.title ?? player["series"]?.string ?? player["title"]?.string,
-              !selected.isEmpty, !actual.isEmpty else { return false }
+        guard let selected = selection["series"]?.string, !selected.isEmpty else { return false }
         func normalized(_ value: String) -> String {
             value.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))
                 .unicodeScalars.filter(CharacterSet.alphanumerics.contains).map(String.init).joined()
         }
-        return normalized(selected) != normalized(actual)
+        // A free-form display title may name an episode rather than its series.
+        // Only explicit series metadata or our recognized suffix provides a comparison.
+        let names = [parsed?.title, player["series"]?.string].compactMap { $0 }.filter { !$0.isEmpty }
+        return names.contains { normalized(selected) != normalized($0) }
     }
 
     /// Only the explicit, trailing SxxExx display marker is interpreted as an
