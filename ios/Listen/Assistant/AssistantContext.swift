@@ -5,6 +5,7 @@ struct AssistantContext: Sendable {
     struct Page: Sendable { var url: String; var title: String; var text: String }
     var material = MaterialIndex()
     var earlier = ""
+    var earlierStatements: [AssistantWorkingContext.Archived] = []
     var pages: [Page] = []
 
     static func loadPages(_ links: [String]) async -> [Page] {

@@ -165,3 +165,26 @@ Physical microphone capture, echo cancellation across mute/unmute and real speak
 continuity remain unverified for this change. No new recordings or physical device
 commands were used in these checks. Device configuration, recordings and analysis
 artifacts are excluded from the public change.
+
+## General-purpose working context
+
+28 November 2026: bounded original participant quotations now carry relevant earlier
+constraints, corrections and task context beyond the last sixteen messages. Retention
+cues select source evidence; they do not create a semantic profile or new instructions.
+The same context goes to routing, task workers and speculative preparation. No additional
+model call is needed to retain it. Current-session evidence and dated prior-session quotes
+are separate; recent explicit corrections govern the current task. Earlier quoted tasks
+cannot grant permissions or become an automatic action queue.
+
+When conversation notes are enabled, exact selected statements are stored in a bounded
+0600 sidecar in the selected topic's conversation folder. An optional model-summary rewrite
+does not replace that evidence. Clearing topic notes removes both. Sidecar reads reject
+symlinks, excessive sizes and invalid shapes. With notes disabled, earlier summaries and
+statement sidecars are excluded; within-session working context still works.
+
+Seven focused Foundation checks passed for cross-domain continuity, source-role isolation,
+corrections, bounded complete quotations, dated provenance and local persistence/clearing.
+Native integration checks and the combined client candidate remain pending at this commit.
+`WorkingContextModelProbe` is an explicit opt-in four-call synthetic comparison against the
+recent-history-only input using the existing model adapter, silent output and no tools.
+Its tiny writing/choice rubric is not a general intelligence or voice-speed benchmark.

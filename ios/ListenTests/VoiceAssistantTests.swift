@@ -1341,7 +1341,7 @@ private actor WorkWireDouble {
         }
         Issue.record("Timed out waiting for a synthetic assistant event")
     }
-    private func setup(standing: Bool = false, maximumTurns: Int = 40, limitModelRequests: Bool = false, timeout: Duration = .seconds(30), budget: Double = .greatestFiniteMagnitude, withTools: Bool = true, storeFile: URL? = nil, adaptive: Bool = false, webSearch: Bool = false, modelName: String = "synthetic", reviewer: (any ModelClient)? = nil, now: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime }) throws -> (VoiceAssistantSession, VoiceModelDouble, VoiceSpeakerDouble, MCPWireDouble) {
+    private func setup(standing: Bool = false, maximumTurns: Int = 40, limitModelRequests: Bool = false, timeout: Duration = .seconds(30), budget: Double = .greatestFiniteMagnitude, withTools: Bool = true, storeFile: URL? = nil, adaptive: Bool = false, webSearch: Bool = false, modelName: String = "synthetic", reviewer: (any ModelClient)? = nil, context: AssistantContext = .init(), keepNotes: Bool = true, now: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime }) throws -> (VoiceAssistantSession, VoiceModelDouble, VoiceSpeakerDouble, MCPWireDouble) {
         let wire = MCPWireDouble(), model = VoiceModelDouble(), speaker = VoiceSpeakerDouble()
         let store = MCPStore(file: storeFile ?? FileManager.default.temporaryDirectory.appending(path: "voice-tests-\(UUID())/mcp.json"),
             readSecret: { _ in nil }, writeSecret: { _, _ in }, deleteSecret: { _ in },
@@ -1351,15 +1351,52 @@ private actor WorkWireDouble {
         topic.language = .en
         var config = VoiceAssistantConfiguration(enabled: true, toolIDs: withTools ? ["home.light"] : [], limitModelRequests: limitModelRequests, maximumTurns: maximumTurns)
         config.adaptiveRouting = adaptive
+        config.keepNotes = keepNotes
         config.webSearch = webSearch
         let system = ListenSystem.builtIns.first { $0.id == "voice-assistant" }!
-        let session = VoiceAssistantSession(topic: topic, system: system, configuration: config, client: model, model: modelName, speaker: speaker, modelTimeout: timeout, reactionDelay: nil, budgetUSD: budget, now: now, openingReviewer: reviewer)
+        let session = VoiceAssistantSession(topic: topic, system: system, configuration: config, client: model, model: modelName, speaker: speaker, modelTimeout: timeout, reactionDelay: nil, budgetUSD: budget, context: context, now: now, openingReviewer: reviewer)
         session.start(store: store)
         return (session, model, speaker, wire)
     }
 
     private func heard(_ id: UInt64, _ text: String, final: Bool = false, revision: Int = 1) -> TranscriptSegment {
         TranscriptSegment(segmentID: id, isFinal: final, revision: revision, voice: nil, speaker: .unknown, text: text, startMs: 0, endMs: 0)
+    }
+
+    @Test func workingContextRetainsEarlierConstraintsWithoutExtraModelCalls() async throws {
+        let (session, model, _, wire) = try setup(withTools: false)
+        defer { session.stop() }
+        await model.configure(output: "A complete synthetic response.")
+        try await wait { session.ready }
+        session.submit("Review the synthetic patch; only inspect files, never deploy.")
+        try await wait { !session.thinking }
+        for index in 0..<20 {
+            session.submit("Unrelated synthetic follow-up \(index).")
+            try await wait { !session.thinking }
+        }
+        session.submit("Continue with the next useful step.")
+        try await wait { !session.thinking }
+        let input = try #require(await model.inputs.last)
+        let payload = try JSONDecoder().decode(HarnessValue.self, from: Data(input.utf8))
+        #expect(payload.object?["working_context"] != nil)
+        guard case .array(let quotes) = payload.object?["working_context"]?.object?["current_conversation"] else { Issue.record("Missing carried context"); return }
+        #expect(quotes.contains { $0.object?["quote"]?.string == "Review the synthetic patch; only inspect files, never deploy." })
+        #expect(await model.inputs.count == 22 && session.modelRequests == 22)
+        #expect(await wire.calls == 0, "retaining context must not create tool actions")
+    }
+
+    @Test func disabledNoteMemoryDoesNotLoadEarlierConversationEvidence() async throws {
+        let archived = AssistantWorkingContext.Archived(conversation: "2026-01-02_12-00-00", quote: "Only the obsolete synthetic constraint.")
+        let (session, model, _, _) = try setup(withTools: false,
+            context: AssistantContext(earlier: "Obsolete synthetic summary.", earlierStatements: [archived]), keepNotes: false)
+        defer { session.stop() }
+        await model.configure(output: "A fresh synthetic answer.")
+        try await wait { session.ready }
+        session.submit("Begin this fresh synthetic task.")
+        try await wait { !session.thinking }
+        let input = try #require(await model.inputs.last)
+        #expect(!input.contains("obsolete") && !input.contains("Obsolete"))
+        #expect(session.contextStatements().isEmpty)
     }
 
     @Test func sentencesOfOneTurnGoOutTogetherAfterAPause() async throws {
