@@ -203,6 +203,16 @@ model call is needed to retain it. Current-session evidence and dated prior-sess
 are separate; recent explicit corrections govern the current task. Earlier quoted tasks
 cannot grant permissions or become an automatic action queue.
 
+An input-order candidate keeps the static topic/tool prefix and places historical
+evidence before recent action observations, with current dialogue last. Unknown fields
+remain present. Two structural checks reproduce the old trailing-history order and pass
+after the change; decoded JSON values and payload byte count are unchanged. Independent
+source inspection confirms that HTTP/Responses and router/official-CLI paths carry the
+encoded JSON as a string, preserving this inner order. Mac Catalyst compilation passed.
+This establishes the input mechanism, not improved answers or the cause of any particular
+recording. No model call was made for this candidate; semantic/live acceptance remains
+open in issue #6, and this follow-up is not deployed to installed build 57.
+
 When conversation notes are enabled, exact selected statements are stored in a bounded
 0600 sidecar in the selected topic's conversation folder. An optional model-summary rewrite
 does not replace that evidence. Clearing topic notes removes both. Sidecar reads reject
