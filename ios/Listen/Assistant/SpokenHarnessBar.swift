@@ -24,7 +24,7 @@ struct SpokenHarnessBar: View {
     private static let sentenceID = "spoken.words.sentence"
 
     private var state: (title: String, note: String, symbol: String) {
-        if model.conversationMicrophoneMuted { return ("Microphone muted", "Replies and tools continue.", "mic.slash.fill") }
+        if model.conversationMicrophoneMuted && !spoken.paused { return ("Microphone muted", "Replies and tools continue.", "mic.slash.fill") }
         return switch spoken.activity {
         case .paused: ("Paused", "Nothing is said until the conversation goes on.", "pause.fill")
         case .preparing: ("Preparing", spoken.listensWhileSpeaking ? "Listen hears you." : "Listen does not hear you meanwhile.", "speaker.wave.1")

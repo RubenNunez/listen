@@ -9,7 +9,7 @@ struct MCPTool: Codable, Equatable, Sendable {
         guard let object = value.object, let name = object["name"]?.string,
               !name.isEmpty, name.utf8.count <= 128, let schema = object["inputSchema"]?.object else { throw MCPFailure.invalidResponse }
         var tool = Self(name: name, description: String((object["description"]?.string ?? "").prefix(1000)), inputSchema: schema)
-        if tool.needsExplicitDomain {
+        if tool.needsExplicitDomain, tool.fields != nil {
             tool.inputSchema["required"] = .array(tool.required.sorted().map(HarnessValue.string))
         }
         return tool

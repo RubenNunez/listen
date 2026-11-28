@@ -51,6 +51,13 @@ import Testing
         #expect(tool.accepts(["domain": .array([.string("light")]), "area": .string("Demo room")]))
         #expect(tool.accepts(["domain": .array([.string("fan")])]), "no hardcoded default to lights")
         #expect(tool.inputSchema["required"] == .array([.string("domain")]))
+        // Local strengthening must not repair an unsupported upstream schema.
+        for required: HarnessValue in [.array([.integer(7)]), .array([.string("domain"), .string("domain")])] {
+            var object = try #require(value.object)
+            var schema = try #require(object["inputSchema"]?.object)
+            schema["required"] = required; object["inputSchema"] = .object(schema)
+            #expect(try MCPTool.read(.object(object)).fields == nil)
+        }
     }
 
     @Test func continuationReceiptsNeedNoSyntheticActionOrNewPlaybackFlag() {
