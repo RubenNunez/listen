@@ -55,6 +55,10 @@ struct StartView: View {
             .padding(.vertical, 10)
             .frame(maxWidth: 230)
             .glassEffect(.regular, in: .capsule)
+            Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—") · Build \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "—")")
+                .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
+                .padding(.top, 10)
+                .accessibilityIdentifier("start.version")
         }
         .sheet(item: $sheet) { destination in
             switch destination {
