@@ -309,3 +309,17 @@ input. These were build-only checks: no test microphone, speaker playback or
 device action was started. Actual narrow/wide window appearance and keyboard
 focus have not been accepted in a running app. No device upgrade is claimed by
 these checks.
+
+### TV connection receipts
+
+A validated `tv_unreachable` outcome receives a local connection-specific phrase
+in German or English, independent of the RPC success flag. Service speech stays
+untrusted. The phrase makes no claim about content availability, language or
+whether playback previously started; it initiates no retry. Duplicate outcome
+keys and unstructured claims do not select this diagnostic.
+
+Two independent synthetic connection regressions failed before the correction.
+Twenty targeted receipt/identity checks passed afterward against the actual
+Foundation decoder source, including null/true/false playback metadata and
+malformed receipts. No app, microphone, model, network or player was started by
+these checks. This is contract validation, not a live reachability benchmark.
