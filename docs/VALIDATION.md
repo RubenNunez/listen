@@ -165,3 +165,23 @@ Physical microphone capture, echo cancellation across mute/unmute and real speak
 continuity remain unverified for this change. No new recordings or physical device
 commands were used in these checks. Device configuration, recordings and analysis
 artifacts are excluded from the public change.
+
+### Recognition recovery after unmuting (build 57)
+
+The original mute implementation could wait for an analyzer timestamp while blocking
+the very frames needed to reach it. Build 57 removes that input barrier. Cancellation
+discards unfinished pre-mute analysis without gating resumed frames; a converted-buffer
+clock and late-result filtering preserve the recognition boundary. Explicit utterance
+finalization uses already-consumed audio, rather than a possibly future input timestamp.
+See Apple's [finalization contract](https://developer.apple.com/documentation/speech/speechanalyzer/finalize%28through%3A%29)
+and [cancellation contract](https://developer.apple.com/documentation/speech/speechanalyzer/cancelanalysis%28before%3A%29),
+verified 28 November 2026.
+
+The explicit opt-in `LiveRecognitionMuteProbe` feeds an owner-supplied local WAV into
+the real SpeechAnalyzer, with physical input disabled and no assistant, model, tools or
+audio player. It observed recognition before mute, after unmute and after five rapid
+toggles, with increasing segment IDs and no old results delivered without new input.
+The probe passed in 4.410 seconds; this is test duration, not conversational latency.
+The same 39 combined native regressions also passed on build 57. Signed iOS and Mac
+Catalyst test builds succeeded. The fixture and receipts remain outside version control.
+This does not establish physical microphone, echo-cancellation or speaker quality.

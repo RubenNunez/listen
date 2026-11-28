@@ -35,7 +35,9 @@ final class LocalTransport: Transport {
         seconds + gaps.filter { seconds >= $0.after }.reduce(0) { $0 + $1.duration }
     }
     private var discardThrough = 0.0
-    private var inputBarrier: Task<Void, Never>?
+    private var inputCancellation: Task<Void, Never>?
+    /// The analyzer's converted feed clock, not the microphone's input sample count.
+    private var analyzerInputEnd = CMTime.zero
 
     func setInputMuted(_ muted: Bool) {
         inputMuted = muted
@@ -45,23 +47,31 @@ final class LocalTransport: Transport {
                 captureGaps.append((Double(hearingSamples) / WireProtocol.sampleRate, max(0, now - start)))
                 mutedAt = nil
             }
+            RunRecorder.assistantOutput?.log("voice_recognition", ["state": "input_resumed", "epoch": inputEpoch])
             return
         }
         if mutedAt == nil { mutedAt = now }
         inputEpoch += 1
-        discardThrough = Double(hearingSamples) / WireProtocol.sampleRate
+        let cutoff = analyzerInputEnd
+        discardThrough = cutoff.seconds
+        committedSentences = 0
+        sentenceSeen = .init()
+        segment += 1
+        revision = 0
+        lastSentenceEnd = discardThrough
+        converter = nil
+        RunRecorder.assistantOutput?.log("voice_recognition", ["state": "input_muted", "epoch": inputEpoch, "discard_before_s": discardThrough])
         guard let analyzer else { return }
-        inputBarrier?.cancel()
-        let heard = CMTime(value: CMTimeValue(hearingSamples), timescale: CMTimeScale(WireProtocol.sampleRate))
-        inputBarrier = Task { [weak self] in
-            try? await analyzer.finalize(through: heard)
+        inputCancellation?.cancel()
+        let epoch = inputEpoch
+        // Mute discards pending input. Finalizing an end-exclusive/future sample
+        // while blocking all new input can wait forever. Cancellation never gates
+        // resumed frames; late pre-mute results are still filtered below.
+        inputCancellation = Task { [weak self] in
             guard !Task.isCancelled else { return }
-            self?.committedSentences = 0
-            self?.sentenceSeen = .init()
-            self?.segment += 1
-            self?.revision = 0
-            self?.lastSentenceEnd = self?.discardThrough ?? 0
-            self?.inputBarrier = nil
+            await analyzer.cancelAnalysis(before: cutoff)
+            guard !Task.isCancelled, let self, self.inputEpoch == epoch else { return }
+            RunRecorder.assistantOutput?.log("voice_recognition", ["state": "pending_input_discarded", "epoch": epoch])
         }
     }
     private var segment: UInt64 = 1
@@ -195,9 +205,12 @@ final class LocalTransport: Transport {
     }
 
     func sendAudio(_ frame: AudioFrame) {
-        guard listening, !inputMuted, inputBarrier == nil, let input, let buffer = buffer(from: frame.pcm) else { return }
+        guard listening, !inputMuted, let input, let buffer = buffer(from: frame.pcm) else { return }
         inputActivity.receive(frame.pcm)
-        input.yield(AnalyzerInput(buffer: buffer))
+        let start = analyzerInputEnd
+        let duration = CMTime(value: CMTimeValue(buffer.frameLength), timescale: CMTimeScale(buffer.format.sampleRate.rounded()))
+        analyzerInputEnd = CMTimeAdd(start, duration)
+        input.yield(AnalyzerInput(buffer: buffer, bufferStartTime: start))
         hearingSamples += frame.pcm.count / MemoryLayout<Int16>.size
         guard refiner != nil else { return }
         let frameSamples = WireProtocol.frameBytes / 2
@@ -215,10 +228,9 @@ final class LocalTransport: Transport {
 
     func endUtterance() {
         guard listening, let analyzer else { return }
-        // Through the sound heard so far: without a time it waits for the end of the input,
-        // which a live microphone never reaches, and nothing after it is recognised.
-        let heard = CMTime(value: CMTimeValue(hearingSamples), timescale: CMTimeScale(WireProtocol.sampleRate))
-        Task { try? await analyzer.finalize(through: heard) }
+        // nil finalizes only audio already consumed. An input/output conversion
+        // delay or an exclusive buffer end must never request future audio.
+        Task { try? await analyzer.finalize(through: nil) }
     }
 
     // MARK: Recognition
@@ -260,7 +272,7 @@ final class LocalTransport: Transport {
                 print("[Listen] transcribing \(locale.identifier), format \(String(describing: analyzerFormat))")
                 emit(.state(.listening, reason: nil))
                 for try await result in transcriber.results {
-                    guard !inputMuted, inputBarrier == nil, result.range.start.seconds >= discardThrough else { continue }
+                    guard !inputMuted, result.range.start.seconds >= discardThrough else { continue }
                     heard(String(result.text.characters), isFinal: result.isFinal,
                           marks: Self.timeMarks(in: result.text), audioEnd: result.range.end.seconds)
                 }
@@ -597,7 +609,8 @@ final class LocalTransport: Transport {
     }
 
     private func teardown() {
-        inputBarrier?.cancel(); inputBarrier = nil
+        inputCancellation?.cancel(); inputCancellation = nil
+        analyzerInputEnd = .zero
         discardThrough = 0
         answers?.stop()
         refining?.cancel()
