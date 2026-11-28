@@ -224,7 +224,13 @@ enum AssistantToolFeedback {
     /// untrusted data and is never read verbatim, including when the RPC succeeded.
     private static func playbackReceipt(_ raw: String, arguments: [String: ConversationValue], language: Language) -> String? {
         guard let object = structured(raw), let player = object["player"]?.object,
+              ["done", "playing"].contains(object["outcome"]?.string ?? ""),
               player["error"] == nil || player["error"] == .string("") else { return nil }
+        if playbackIdentityConflicts(object, player: player, arguments: arguments) {
+            return language == .de
+                ? "Die Rückmeldung passt nicht zum angefragten Inhalt. Ich kann die Wiedergabe noch nicht bestätigen."
+                : "The receipt does not match the requested content. I cannot confirm playback yet."
+        }
         let state = player["state"]?.string
         if object["outcome"] == .string("done") {
             if case .string(let action) = arguments["action"] {
@@ -272,6 +278,68 @@ enum AssistantToolFeedback {
                 : "The \(audio) audio track is available, but playback could not start."
         }
         return language == .de ? "Die Wiedergabe konnte nicht gestartet werden." : "Playback could not start."
+    }
+
+    /// Compare supplied identities only. Missing legacy metadata is not an invented
+    /// conflict, and matching media IDs permit display aliases, never another episode.
+    private static func playbackIdentityConflicts(_ object: [String: HarnessValue], player: [String: HarnessValue],
+                                                  arguments: [String: ConversationValue]) -> Bool {
+        let selection = object["selection"]?.object ?? [:]
+        func integer(_ value: HarnessValue?) -> Int64? {
+            guard case .integer(let value) = value else { return nil }
+            return value
+        }
+        func identifier(_ value: HarnessValue?) -> String? {
+            guard let value = value?.string, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  value.utf8.count <= 256,
+                  !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else { return nil }
+            return value
+        }
+        // A start that opts into playback correlation must supply a matching echo.
+        // A status/control can describe an existing player's ID without reserving a
+        // new start of its own. Legacy receipts keep their available identity checks.
+        if object["playback_id"] != nil || (object["playback_started"] == .bool(true) && player["playback_id"] != nil) {
+            guard let expected = identifier(object["playback_id"]),
+                  let actual = identifier(player["playback_id"]), expected == actual else { return true }
+        }
+        let parsed = player["title"]?.string.flatMap(episodeTitle)
+        for key in ["season", "episode", "year"] {
+            var values = [integer(selection[key]), integer(player[key])].compactMap { $0 }
+            if case .integer(let requested) = arguments[key] { values.append(Int64(requested)) }
+            if key == "season", let parsed { values.append(parsed.season) }
+            if key == "episode", let parsed { values.append(parsed.episode) }
+            if Set(values).count > 1 { return true }
+        }
+
+        var sameMedia = false
+        for key in ["imdb_id", "media_id"] {
+            if let selected = identifier(selection[key]), let actual = identifier(player[key]) {
+                if selected != actual { return true }
+                sameMedia = true
+            }
+        }
+        if sameMedia { return false }
+        guard let selected = selection["series"]?.string, !selected.isEmpty else { return false }
+        func normalized(_ value: String) -> String {
+            value.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+                .unicodeScalars.filter(CharacterSet.alphanumerics.contains).map(String.init).joined()
+        }
+        // A free-form display title may name an episode rather than its series.
+        // Only explicit series metadata or our recognized suffix provides a comparison.
+        let names = [parsed?.title, player["series"]?.string].compactMap { $0 }.filter { !$0.isEmpty }
+        return names.contains { normalized(selected) != normalized($0) }
+    }
+
+    /// Only the explicit, trailing SxxExx display marker is interpreted as an
+    /// episode identity. Other title formats remain opaque data.
+    private static func episodeTitle(_ title: String) -> (title: String, season: Int64, episode: Int64)? {
+        guard title.utf8.count <= 512,
+              let regex = try? NSRegularExpression(pattern: #"(?i)\s+[–—-]?\s*S([0-9]{1,3})\s*E([0-9]{1,4})\s*$"#),
+              let match = regex.firstMatch(in: title, range: NSRange(title.startIndex..., in: title)),
+              let range = Range(match.range, in: title),
+              let seasonRange = Range(match.range(at: 1), in: title), let season = Int64(title[seasonRange]),
+              let episodeRange = Range(match.range(at: 2), in: title), let episode = Int64(title[episodeRange]) else { return nil }
+        return (String(title[..<range.lowerBound]).trimmingCharacters(in: .whitespaces), season, episode)
     }
 
     private static func titleClarification(_ raw: String, language: Language) -> String? {

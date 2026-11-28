@@ -151,6 +151,17 @@ afterwards, including hostile service speech, invalid title/year data and confli
 or missing playback flags. This follow-up is source-tested and is not deployed in the
 installed build 57.
 
+Playback receipts reject explicit conflicts between requested, selected and observed
+season/episode/year, media IDs and trailing `SxxExx` player-title markers. Matching
+stable media IDs permit display aliases but never override an episode conflict.
+If a receipt supplies a `playback_id`, the player must echo that ID. Status/control
+receipts may describe an existing player's ID without reserving a new start; older
+adapters with neither ID remain supported. Opaque display labels are not assumed to
+be series names. Conflicts produce an unconfirmed response, without
+retrying or dispatching anything. Five synthetic identity regressions and the existing
+receipt checks pass against the actual Foundation decoder, including the independent
+stale-player reproducer. No microphone, model, network or physical player is involved.
+
 If an observation changes during generation, a buffered answer is regenerated from the
 new facts at most once before speaking or proposing operations. Direct answers that
 start while a native operation is pending are buffered through model completion for this
