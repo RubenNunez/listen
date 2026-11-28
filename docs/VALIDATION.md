@@ -76,3 +76,43 @@ play-anything request delegates title selection within stated constraints, while
 identity/availability checks and native action permissions still apply. This is
 model guidance; the full recommendation-to-playback flow remains a live validation
 item and depends on the tools actually bound in that installation.
+
+## Reported playback alternatives
+
+Listen recognizes an optional application-level result envelope; this is not a
+standard MCP result field. An `alternative_available` outcome can carry
+`playback_started: false`, `requires_language_confirmation: true` and a bounded
+`available_alternatives` list. The first candidate must contain a bounded series
+title, positive integer season/episode, supported audio-language code, `ready: true`
+and `audio_verified: true`. Only these typed facts reach the native spoken offer;
+other payload fields remain diagnostic data. Explicit requested-language metadata
+must not contradict the actual request. A matching language is not a switch offer.
+
+The presentation asks before changing language and never dispatches an action.
+Subsequent explicit acceptance is a new user turn; normal tool permissions still
+apply and the exact offered candidate/language must be preserved. Unknown action
+outcomes are never retried. A bounded plain-language no-playable-result failure is
+distinct from title ambiguity and does not ask for already sufficient episode details.
+
+Six focused production-source headless checks passed, including the new
+alternative/unavailable checks. They cover malformed and duplicate-key envelopes,
+unverified or not-ready audio, playback already started, invalid consent policy,
+conflicting requested language, unsafe labels, invalid episode values and separate
+unknown-outcome handling. They establish result presentation safeguards, not that
+an external service actually has a stream or that a live conversation chose correctly.
+
+The MCP client now prefers complete bounded `structuredContent` objects and also
+retains complete JSON-object text up to 8 KiB, so machine-readable offers do not
+pass through the 2,000-character plain diagnostic limit. The sixth regression
+exercises actual MCP envelopes containing text plus structured content, JSON text
+longer than 2,000 characters, and the unchanged plain-text fallback. Playback
+state and viewing progress must come from observed connected-tool state; ordinary
+conversation notes do not prove what was watched. Availability of a concrete
+continue capability is installation-specific.
+
+The opted-in owner setup also supports adding a capability to an existing server
+with the same identity, endpoint and protocol revision. It retains existing exact
+tool mappings and owner grants, rejects an attempted mapping change, and appends
+new permissions without standing grants. Source IDs and other servers remain intact.
+Native setup is discovery only; binding a continue capability does not test or invoke
+playback. Device-specific configurations and watch state stay outside this repository.

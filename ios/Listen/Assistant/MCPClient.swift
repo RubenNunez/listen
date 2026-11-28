@@ -214,6 +214,27 @@ actor MCPClient {
         return tools
     }
 
+    /// Keep bounded machine-readable facts complete, separately from the short
+    /// plain-text diagnostic fallback. Neither path is executable or spoken verbatim.
+    private static func observedDetail(_ text: String, structured: HarnessValue?) -> String {
+        let data = Data(text.utf8)
+        let textValue: HarnessValue?
+        if data.count <= 8192, (try? HarnessJSON.checkUniqueKeys(data)) != nil {
+            textValue = try? JSONDecoder().decode(HarnessValue.self, from: data)
+        } else { textValue = nil }
+        for candidate in [structured, textValue] {
+            guard let candidate, candidate.object != nil,
+                  let encoded = try? JSONEncoder().encode(candidate), encoded.count <= 8192 else { continue }
+            return String(decoding: encoded, as: UTF8.self)
+        }
+        let cleaned = text.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) || $0 == "\n" }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if cleaned.count > 2000, trimmed.hasPrefix("{") || trimmed.hasPrefix("[") {
+            return "The structured tool result could not be retained completely; its full data is unavailable."
+        }
+        return String(cleaned.prefix(2000))
+    }
+
     func call(_ tool: MCPTool, arguments: [String: ConversationValue]) async -> ConversationToolObservation {
         guard tool.accepts(arguments) else { return .completed(.failed(detail: "The tool arguments do not match its supported schema.")) }
         do {
@@ -224,7 +245,7 @@ actor MCPClient {
                 guard part.object?["type"] == .string("text") else { return nil }
                 return part.object?["text"]?.string
             }.joined(separator: "\n")
-            let detail = String(text.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) || $0 == "\n" }.prefix(2000))
+            let detail = Self.observedDetail(text, structured: object["structuredContent"])
             if object["isError"] == .bool(true) { return .completed(.failed(detail: detail.isEmpty ? "The tool reported an error." : detail)) }
             return .completed(.succeeded(detail: detail.isEmpty ? "The tool reported completion." : detail))
         } catch {

@@ -44,7 +44,20 @@ import Testing
         try voice.validate()
         configuration.conversation = voice
         system.configuration = configuration
-        try store.save(input.server, newToken: input.token)
+        var server = input.server
+        if let existing = store.servers.first(where: { $0.id == server.id }),
+           existing.endpoint == server.endpoint, existing.revision == server.revision {
+            // Owner maintenance is additive; a copied setup cannot revoke or create
+            // standing grants for the installation's existing exact tool bindings.
+            var permissions = existing.permissions
+            for addition in input.server.permissions {
+                if let previous = permissions.first(where: { $0.id == addition.id }) {
+                    try #require(previous.tool == addition.tool, "Existing MCP tool mapping changed")
+                } else { permissions.append(addition) }
+            }
+            server.permissions = permissions
+        }
+        try store.save(server, newToken: input.token)
         systems.update(system)
         try #require(systems.lastError == nil)
         let resolved = await MCPStore().resolve(input.server.permissions.map(\.id))

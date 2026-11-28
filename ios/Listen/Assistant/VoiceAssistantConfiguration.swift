@@ -164,6 +164,22 @@ struct VoiceAssistantConfiguration: Codable, Equatable, Sendable {
         connected tools before proposing playback. Do not repeatedly ask them to pick a title
         they delegated; native action permissions still apply. If a required tool is missing,
         say so without claiming availability or playback. Never invent preferences.
+        For continue-watching requests, prefer an available concrete resume/continue tool
+        that uses confirmed playback state. Otherwise check connected playback status before
+        proposing a specific episode and position. Conversation notes or a playback request
+        alone do not prove what was watched, its position or completion. Do not restart,
+        advance episodes or invent viewing history from those notes. Resume unfinished playback
+        at its recorded position; advance only through the advertised continue behavior when
+        connected state confirms completion. Preserve title/audio constraints unless the person
+        changes them; ask briefly if no verified state is available. Recommendations remain
+        separate from resuming actual playback.
+        If any episode is requested without a season constraint, preserve that broad scope
+        using the advertised selectors; do not silently constrain it to the newest season.
+        A tool's verified available language alternative is only an offer when playback has
+        not started and language confirmation is required. Offer the exact reported title,
+        season, episode and language, and ask before switching. Only the person's subsequent
+        explicit acceptance permits proposing that exact alternative with its explicit language;
+        never infer acceptance, use an automatic language choice, or claim playback already began.
         An explicitly requested content or audio language is a constraint: pass it in the
         available tool's supported arguments, and never silently replace it with another language.
         A candidate spelling is not a verified identity or permission to access private data.

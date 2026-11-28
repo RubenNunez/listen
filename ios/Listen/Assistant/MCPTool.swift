@@ -113,6 +113,11 @@ enum AssistantToolFeedback {
                        arguments: [String: ConversationValue], language: Language, variant: Int = 0) -> String? {
         func text(_ en: String, _ de: String) -> String { language == .de ? de : en }
         switch result {
+        case .succeeded(let detail), .failed(let detail):
+            if let offer = languageOffer(detail, arguments: arguments, language: language) { return offer }
+        default: break
+        }
+        switch result {
         case .succeeded(let detail):
             if ["HassTurnOn", "HassTurnOff"].contains(tool ?? ""),
                arguments["domain"] == .array([.string("light")]),
@@ -177,6 +182,10 @@ enum AssistantToolFeedback {
                 return text("The service could not identify the selection uniquely. Can you be more specific?",
                             "Der Dienst konnte die Auswahl nicht eindeutig zuordnen. Kannst du sie genauer benennen?")
             }
+            if reportsNoPlayableResult(detail) {
+                return text("The service couldn't find a playable result for this request.",
+                            "Der Dienst hat dafür gerade keinen abspielbaren Treffer gefunden.")
+            }
             return text("The service reported an error. Check the details.", "Der Dienst meldet einen Fehler. Schau bitte in die Details.")
         case .outcomeUnknown:
             return text("The result is unknown. I will not repeat the action.", "Das Ergebnis ist unbekannt. Ich wiederhole die Aktion nicht.")
@@ -186,13 +195,67 @@ enum AssistantToolFeedback {
         }
     }
 
-    private static func needsClarification(_ raw: String) -> Bool {
+    /// A reported alternative is an offer, never evidence of playback or consent.
+    private static func languageOffer(_ raw: String, arguments: [String: ConversationValue], language: Language) -> String? {
+        guard raw.utf8.count <= 8192 else { return nil }
+        let data = Data(raw.utf8)
+        guard (try? HarnessJSON.checkUniqueKeys(data)) != nil,
+              let value = try? JSONDecoder().decode(HarnessValue.self, from: data),
+              let object = value.object,
+              object["outcome"] == .string("alternative_available"),
+              object["playback_started"] == .bool(false),
+              object["requires_language_confirmation"] == .bool(true),
+              case .array(let alternatives) = object["available_alternatives"],
+              (1...4).contains(alternatives.count),
+              let first = alternatives.first?.object,
+              first["ready"] == .bool(true), first["audio_verified"] == .bool(true),
+              let title = first["series"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty, title.count <= 120,
+              title.allSatisfy({ $0.isLetter || $0.isNumber || " -'’&:.,!?()".contains($0) }),
+              case .integer(let season) = first["season"], (1...999).contains(season),
+              case .integer(let episode) = first["episode"], (1...9999).contains(episode),
+              let code = first["audio_language"]?.string,
+              let offered = languageName(code, language: language) else { return nil }
+        let requestedArgument: String?
+        if case .string(let code) = arguments["audio_language"] { requestedArgument = code }
+        else { requestedArgument = nil }
+        let declared = object["requested_audio_language"]?.string
+        if let requestedArgument, requestedArgument != "auto", let declared,
+           requestedArgument != declared { return nil }
+        let requested = declared ?? requestedArgument
+        guard requested != code else { return nil }
+        let unavailable = requested.flatMap { languageName($0, language: language) }
+        if language == .de {
+            let opening = unavailable.map { "Auf \($0) habe ich dafür nichts Abspielbares gefunden. " } ?? ""
+            return opening + "Ich kann dir „\(title)“, Staffel \(season), Folge \(episode) auf \(offered) anbieten. Soll ich diese Folge auf \(offered) starten?"
+        }
+        let opening = unavailable.map { "I couldn't find a playable result in \($0). " } ?? ""
+        return opening + "I can offer \"\(title)\", season \(season), episode \(episode) in \(offered). Shall I start this episode in \(offered)?"
+    }
+
+    private static func languageName(_ code: String, language: Language) -> String? {
+        let names = language == .de
+            ? ["de": "Deutsch", "en": "Englisch", "es": "Spanisch", "it": "Italienisch", "fr": "Französisch"]
+            : ["de": "German", "en": "English", "es": "Spanish", "it": "Italian", "fr": "French"]
+        return names[code]
+    }
+
+    private static func plainFailure(_ raw: String) -> String? {
         let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty, value.count <= 500,
               !value.contains(where: { "{}[]`\n\r".contains($0) }), !value.contains("://"),
-              !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else { return false }
-        let lower = value.lowercased()
+              !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else { return nil }
+        return value.lowercased()
+    }
+
+    private static func needsClarification(_ raw: String) -> Bool {
+        guard let lower = plainFailure(raw) else { return false }
         return ["nicht eindeutig", "not uniquely", "ambiguous", "not unique"].contains(where: lower.contains)
+    }
+
+    private static func reportsNoPlayableResult(_ raw: String) -> Bool {
+        guard let lower = plainFailure(raw) else { return false }
+        return ["kein abspielbereiter treffer", "kein abspielbarer treffer", "keinen abspielbaren treffer",
+                "no playable", "no ready stream", "not ready for playback"].contains(where: lower.contains)
     }
 
     /// A returned label is data, never speech instructions or raw service output.

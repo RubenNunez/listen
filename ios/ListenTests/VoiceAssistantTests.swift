@@ -14,6 +14,8 @@ private actor MCPWireDouble {
     var timeouts: [String: TimeInterval] = [:]
     var headers: [String: String] = [:]
     var arguments: [String: HarnessValue] = [:]
+    var resultOverride: HarnessValue?
+    func setResult(_ value: HarnessValue) { resultOverride = value }
     var toolError = false
     var wrongID = false
     func setToolError() { toolError = true }
@@ -33,7 +35,7 @@ private actor MCPWireDouble {
         case "tools/call":
             calls += 1
             arguments = body["params"]?.object?["arguments"]?.object ?? [:]
-            result = .object(["content": .array([.object(["type": .string("text"), "text": .string(toolError ? "Synthetic error." : "Synthetic lamp acknowledged.")])]), "isError": .bool(toolError)])
+            result = resultOverride ?? .object(["content": .array([.object(["type": .string("text"), "text": .string(toolError ? "Synthetic error." : "Synthetic lamp acknowledged.")])]), "isError": .bool(toolError)])
         default: throw MCPFailure.unsupported
         }
         let reply: HarnessValue = .object(["jsonrpc": .string("2.0"), "id": .string(wrongID ? "wrong" : id!), "result": result])
@@ -386,6 +388,76 @@ private actor WorkWireDouble {
             #expect(AssistantToolFeedback.speech(for: .failed(detail: payload), tool: "select_item",
                 arguments: [:], language: .de) == fallback)
         }
+    }
+
+    @Test func languageAlternativesRequireVerifiedReadinessAndAskBeforeSwitching() throws {
+        let payload = #"{"outcome":"alternative_available","playback_started":false,"requires_language_confirmation":true,"requested_audio_language":"de","available_alternatives":[{"series":"Demo & Friends","season":1,"episode":2,"audio_language":"en","ready":true,"audio_verified":true}],"debug":"SYNTHETIC_INTERNAL_DETAIL"}"#
+        let args: [String: ConversationValue] = ["audio_language": .string("de")]
+        let expected = "Auf Deutsch habe ich dafür nichts Abspielbares gefunden. Ich kann dir „Demo & Friends“, Staffel 1, Folge 2 auf Englisch anbieten. Soll ich diese Folge auf Englisch starten?"
+        for result in [ConversationOperationState.failed(detail: payload), .succeeded(detail: payload)] {
+            #expect(AssistantToolFeedback.speech(for: result, tool: "play_episode", arguments: args, language: .de) == expected)
+        }
+        let english = try #require(AssistantToolFeedback.speech(for: .failed(detail: payload), tool: "play_episode", arguments: args, language: .en))
+        #expect(english.contains("season 1, episode 2 in English") && english.contains("Shall I start"))
+        #expect(!english.contains("SYNTHETIC_INTERNAL_DETAIL"))
+        let fallback = "Der Dienst meldet einen Fehler. Schau bitte in die Details."
+        let changes = [
+            (#""playback_started":false"#, #""playback_started":true"#),
+            (#""requires_language_confirmation":true"#, #""requires_language_confirmation":false"#),
+            (#""ready":true"#, #""ready":false"#),
+            (#""audio_verified":true"#, #""audio_verified":false"#),
+            (#""audio_language":"en""#, #""audio_language":"xx""#),
+            (#""requested_audio_language":"de""#, #""requested_audio_language":"es""#),
+            (#""season":1"#, #""season":0"#),
+            (#""episode":2"#, #""episode":2.5"#),
+            ("Demo & Friends", "https://synthetic.invalid/private"),
+            ("Demo & Friends", "   ")
+        ]
+        for (original, replacement) in changes {
+            let invalid = payload.replacingOccurrences(of: original, with: replacement)
+            #expect(AssistantToolFeedback.speech(for: .failed(detail: invalid), tool: "play_episode", arguments: args, language: .de) == fallback)
+        }
+        let duplicate = payload.replacingOccurrences(of: #""playback_started":false"#, with: #""playback_started":false,"playback_started":true"#)
+        #expect(AssistantToolFeedback.speech(for: .failed(detail: duplicate), tool: "play_episode", arguments: args, language: .de) == fallback)
+    }
+
+    @Test func unavailablePlaybackIsNotAnAmbiguousTitleOrAConfirmedAction() {
+        let report = AssistantToolFeedback.speech(for: .failed(detail: "No playable episode is ready."), tool: "play_episode", arguments: [:], language: .en)
+        #expect(report == "The service couldn't find a playable result for this request.")
+        #expect(AssistantToolFeedback.speech(for: .failed(detail: "Für diese Auswahl ist noch kein abspielbereiter Treffer verfügbar."), tool: "play_episode", arguments: [:], language: .de) == "Der Dienst hat dafür gerade keinen abspielbaren Treffer gefunden.")
+        #expect(AssistantToolFeedback.speech(for: .outcomeUnknown(.routeLost), tool: "play_episode", arguments: [:], language: .en) == "The result is unknown. I will not repeat the action.")
+    }
+
+    @Test func completeStructuredOffersSurviveTheShortDiagnosticTextLimit() async throws {
+        let base = #"{"outcome":"alternative_available","playback_started":false,"requires_language_confirmation":true,"requested_audio_language":"de","available_alternatives":[{"series":"Demo Series","season":1,"episode":2,"audio_language":"en","ready":true,"audio_verified":true}],"diagnostics":"PADDING"}"#
+        let raw = base.replacingOccurrences(of: "PADDING", with: String(repeating: "x", count: 2600))
+        let value = try JSONDecoder().decode(HarnessValue.self, from: Data(raw.utf8))
+        let args: [String: ConversationValue] = ["audio_language": .string("de")]
+        for structured in [false, true] {
+            let wire = MCPWireDouble()
+            var result: [String: HarnessValue] = ["isError": .bool(true), "content": .array([.object([
+                "type": .string("text"), "text": .string(structured ? "Synthetic diagnostic text." : raw)])])]
+            if structured { result["structuredContent"] = value }
+            await wire.setResult(.object(result))
+            let client = try MCPClient(endpoint: URL(string: "https://synthetic.invalid/mcp")!, exchange: { try await wire.send($0, id: $1) })
+            let observed = await client.call(syntheticTool, arguments: ["on": .boolean(true)])
+            guard case .completed(.failed(let detail)) = observed else { Issue.record("Expected the explicit failed request, not playback or unknown outcome"); return }
+            #expect(detail.count > 2000)
+            let decoded = try JSONDecoder().decode(HarnessValue.self, from: Data(detail.utf8))
+            #expect(decoded.object?["outcome"] == .string("alternative_available"))
+            let offer = try #require(AssistantToolFeedback.speech(for: .failed(detail: detail), tool: "play_episode", arguments: args, language: .de))
+            #expect(offer.contains("Staffel 1, Folge 2 auf Englisch") && offer.contains("Soll ich"))
+            #expect(await wire.calls == 1)
+        }
+        let wire = MCPWireDouble()
+        await wire.setResult(.object(["isError": .bool(true), "content": .array([.object(["type": .string("text"), "text": .string(String(repeating: "x", count: 3000))])])]))
+        let client = try MCPClient(endpoint: URL(string: "https://synthetic.invalid/mcp")!, exchange: { try await wire.send($0, id: $1) })
+        guard case .completed(.failed(let detail)) = await client.call(syntheticTool, arguments: ["on": .boolean(true)]) else { Issue.record("Expected a reported failure"); return }
+        #expect(detail.count == 2000)
+        let oversized = base.replacingOccurrences(of: "PADDING", with: String(repeating: "x", count: 9000))
+        await wire.setResult(.object(["isError": .bool(true), "content": .array([.object(["type": .string("text"), "text": .string(oversized)])])]))
+        guard case .completed(.failed(let missing)) = await client.call(syntheticTool, arguments: ["on": .boolean(true)]) else { Issue.record("Expected a reported failure"); return }
+        #expect(!missing.hasPrefix("{") && missing.contains("full data is unavailable"))
     }
 
     @Test func lightFeedbackNamesOnlyObservedTargetsAndVariesWithoutAnotherModelCall() {

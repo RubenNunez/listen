@@ -333,6 +333,9 @@ struct VoiceWorkPlan: Sendable {
     Recommendation-only requests do not authorize playback. An explicit play-anything
     request delegates content choice within stated constraints, never native permissions.
     A delegated title choice is not missing essential information.
+    Keep an unconstrained any-episode selection broad across the advertised season selectors.
+    A language alternative is not accepted until the current user explicitly accepts it;
+    then bind the exact observed offered title, season, episode and language, never auto.
     Contextual preferences and public discovery belong to answer work; connected identity
     and availability checks belong to lookups. Where needed, make concrete playback depend
     on that selection/check. Send only resolved supported arguments to MCP, never abstract
