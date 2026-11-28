@@ -151,6 +151,13 @@ afterwards, including hostile service speech, invalid title/year data and confli
 or missing playback flags. This follow-up is source-tested and is not deployed in the
 installed build 57.
 
+Confirmation fields use localized labels and readable language/action values, while
+retaining every supplied field and the exact typed request used for authorization.
+Unknown values remain literal; exact JSON stays under action details. Cancel remains
+the same denial path and now explains how to reformulate a request. Three synthetic
+formatting checks and a Mac Catalyst SDK build passed. Device layout and interaction
+acceptance remain pending; no new conversation or device action was run for this check.
+
 Playback receipts reject explicit conflicts between requested, selected and observed
 season/episode/year, media IDs and trailing `SxxExx` player-title markers. Matching
 stable media IDs permit display aliases but never override an episode conflict.
