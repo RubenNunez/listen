@@ -125,7 +125,10 @@ actor SupertonicVoice: LocalVoiceSynthesizing {
     {
         let manager = try await load(model, voice: voice)
         let style = try Supertonic3VoiceStyle.load(from: SupertonicVoiceFiles.folder().appending(path: "voice_styles/\(voice).json"))
-        let parts = try Self.parts(text, language: language)
+        let speechLanguage = LocalSpeechLanguage.code(for: text, fallback: language,
+            supported: Set(Supertonic3Constants.availableLanguages))
+        let parts = try Self.parts(text, language: language, speechLanguage: speechLanguage)
+        VoiceTiming.note("voice_speech_language", ["model": model, "state": speechLanguage, "reason": language.rawValue])
         let previous = last, started = epoch
         let (stream, continuation) = AsyncThrowingStream.makeStream(of: LocalVoiceChunk.self)
         let job = Task {
@@ -137,7 +140,7 @@ actor SupertonicVoice: LocalVoiceSynthesizing {
                     try Task.checkCancellation()
                     guard epoch == started else { throw CancellationError() }
                     let input = Self.continuationInput(part, continues: index < parts.count - 1)
-                    let audio = try await manager.synthesize(text: input, language: language.rawValue, style: style,
+                    let audio = try await manager.synthesize(text: input, language: speechLanguage, style: style,
                                                              totalSteps: 8, speed: 1.05)
                     try Task.checkCancellation()
                     guard epoch == started else { throw CancellationError() }
@@ -246,8 +249,9 @@ actor SupertonicVoice: LocalVoiceSynthesizing {
     /// Expose bounded utterances as chunks: the SDK otherwise returns a complete
     /// paragraph at once. Preserve every word, including an unusually long token;
     /// splitting that token also prevents the SDK's fixed 128-scalar truncation.
-    static func parts(_ text: String, language: Language) throws -> [String] {
-        let text = SpokenReply.spelledOut(text, language: language)
+    static func parts(_ text: String, language: Language, speechLanguage: String? = nil) throws -> [String] {
+        let outputLanguage = Language(rawValue: speechLanguage ?? language.rawValue)
+        let text = outputLanguage.map { SpokenReply.spelledOut(text, language: $0) } ?? text
         // Count compatibility decompositions and the SDK's expanding substitutions
         // before packing. 70 source graphemes alone is unsafe for repeated umlauts
         // or @ signs in a long identifier.
@@ -260,10 +264,10 @@ actor SupertonicVoice: LocalVoiceSynthesizing {
         var result: [String] = []
         // Leave room for one continuation comma within the SDK's clean 70-scalar cap.
         let limit = 69
-        let linkedWords: Set<String> = language == .de
+        let linkedWords: Set<String> = outputLanguage == .de
             ? ["kein", "keine", "keinen", "keinem", "keiner", "keines", "nicht", "ein", "eine", "einen", "einem", "einer", "eines", "der", "die", "das", "dem", "den", "des", "im", "in", "am", "an", "auf", "aus", "mit", "ohne", "von", "vom", "zum", "zur", "für", "über", "unter", "und", "oder", "aber", "dass"]
             : ["no", "not", "a", "an", "the", "of", "to", "for", "with", "without", "from", "in", "on", "at", "by", "and", "or", "but", "that", "this", "these", "those"]
-        let clauseStarts: Set<String> = language == .de
+        let clauseStarts: Set<String> = outputLanguage == .de
             ? ["das", "der", "die", "den", "dem", "welche", "welcher", "welches", "weil", "wenn", "obwohl", "während", "damit", "dass", "aber", "sondern"]
             : ["which", "who", "whose", "because", "although", "while", "if", "but", "whereas"]
         func phrased(_ sentence: String) -> [String]? {

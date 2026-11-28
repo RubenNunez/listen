@@ -451,9 +451,12 @@ final class VoiceAssistantSession {
             let currentText = speaking && audible ? (acknowledgement?.text ?? lastReply) : nil
             if let reference = [remembered, currentText].compactMap({ $0 }).first(where: { Self.matchesPlaybackEcho(fresh, text: $0) }),
                !singleQuestion {
+                // Preserve the reference even for an unconsumed one-word draft. A
+                // player callback may go quiet before ASR extends it to "I am checking".
+                // Novel continuations still retain all their words and may interrupt.
+                echoText[segment.segmentID] = (reference, now())
                 if fresh.count > 1 || segment.isFinal || remembered != nil {
                     consumeWithoutTurn(segment)
-                    echoText[segment.segmentID] = (reference, now())
                 }
                 record?("voice_echo", ["state": fresh.count == 1 && !segment.isFinal && remembered == nil ? "awaiting_more_words" : "matching_playback", "words": fresh.count])
                 return
@@ -903,7 +906,15 @@ final class VoiceAssistantSession {
         let payload: HarnessValue = .object([
             "topic": .object(["name": .string(topic.name), "notes": .string(String(topic.notes.prefix(8000))), "language": .string(topic.language.rawValue)]),
             "voice": .object(["engine": .string(configuration.talkBackEngine.rawValue),
-                "model": .string(configuration.talkBackModel), "speaker": .string(configuration.talkBackVoice)]),
+                "model": .string(configuration.talkBackModel), "speaker": .string(configuration.talkBackVoice),
+                "language_selection": .string(configuration.talkBackEngine == .local && TalkBack.model(configuration.talkBackModel)?.family == .supertonic
+                    ? "confident_utterance_language_with_topic_fallback" : "topic_language")]),
+            "application": .object(["name": .string("Listen"),
+                "source_repository": .string("https://github.com/RubenNunez/listen"),
+                "source_repository_user_ownership": .string("unknown"),
+                "topic_memory_enabled": .bool(configuration.keepNotes),
+                "memory_policy": .string(configuration.keepNotes ? "local_user_checkpoint_before_optional_summary" : "disabled"),
+                "selected_repositories": .array(topic.repositories.map(HarnessValue.string))]),
             "public_web_search": .object(["available_to_answer_workers": .bool(hasPublicWeb)]),
             "local_workflows": .object(["kind": .string("action_wait_action"), "maximum_wait_seconds": .number(30),
                 "scope": .string("active_conversation_only"), "running": .array(localSequences.map { .object([
@@ -1938,6 +1949,11 @@ final class VoiceAssistantSession {
     private func localized(_ english: String, _ german: String) -> String { topic.language == .de ? german : english }
 
     /// Post-stop text only: no tools, playback or changes to conversation state.
+    func memoryCheckpoint() -> String? {
+        AssistantMemoryCheckpoint.text(messages: history, language: topic.language)
+    }
+
+    /// Optional enhancement of the already-saved local checkpoint.
     func makeNote(prompt: String) async -> String? {
         guard configuration.keepNotes, !noteStarted, !history.isEmpty,
               budgetUSD > 0, reportedCostUSD < budgetUSD,
@@ -1961,7 +1977,7 @@ final class VoiceAssistantSession {
             record?("usage", fields)
         }
         do {
-            for try await chunk in AssistantDeadlineClient(base: client).stream(model: model, system: instructions, user: input, maxTokens: 500) {
+            for try await chunk in AssistantDeadlineClient(base: client, timeout: .seconds(45)).stream(model: model, system: instructions, user: input, maxTokens: 500) {
                 switch chunk {
                 case .text(let value): text += value
                 case .usage(let value): usage = value

@@ -165,7 +165,9 @@ struct AssistantView: View {
             LiveVoiceSettings(configuration: assistant.configuration, language: assistant.language,
                 preview: assistant.preview, canSample: !assistant.paused,
                 canPreviewPulse: !assistant.speaking && !assistant.hearing,
-                choose: { try assistant.chooseVoice($0) }, sample: { assistant.playSample() })
+                choose: { try assistant.chooseVoice($0) }, sample: { assistant.playSample() },
+                models: assistant.configuredModels, tools: assistant.tools.map { $0.capability.rawValue }.sorted(),
+                missingTools: assistant.missing)
         }
         #endif
         .task(id: ReplyMoment(response: assistant.lastReplyID, text: assistant.lastReply, speaking: assistant.speaking, audible: assistant.audible, flowing: assistant.voiceFlowing, interrupted: assistant.replyWasInterrupted, speechCharacters: assistant.replySpeechCharacters, playbackEnded: assistant.replyPlaybackEnded)) {

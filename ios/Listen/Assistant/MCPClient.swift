@@ -9,7 +9,7 @@ enum MCPFailure: Error, LocalizedError, Equatable {
     case endpoint, authentication, unavailable, unsupported, invalidResponse, tooLarge, remote
     var errorDescription: String? {
         switch self {
-        case .endpoint: "Use an HTTPS MCP endpoint. HTTP loopback is supported for development."
+        case .endpoint: "Use HTTPS, or HTTP for a local network or loopback MCP server."
         case .authentication: "The MCP server requires a valid server token."
         case .unavailable: "The MCP server could not be reached."
         case .unsupported: "This MCP feature or tool schema is not supported by this version of Listen."
@@ -103,7 +103,7 @@ actor MCPClient {
     static func validEndpoint(_ url: URL) -> Bool {
         guard url.user == nil, url.password == nil, url.fragment == nil, url.query == nil,
               let host = url.host, !host.isEmpty, url.absoluteString.utf8.count <= 2048 else { return false }
-        return url.scheme == "https" || (url.scheme == "http" && ["localhost", "127.0.0.1", "[::1]", "::1"].contains(host))
+        return url.scheme == "https" || (url.scheme == "http" && LocalNetworkHost.accepts(host))
     }
 
     init(endpoint: URL, revision: MCPRevision = .current, token: String? = nil, exchange: Exchange? = nil) throws {

@@ -442,7 +442,7 @@ private actor WorkWireDouble {
     }
 
     @Test func endpointAndSchemaLimitsRejectUnsupportedOperations() {
-        #expect(!MCPClient.validEndpoint(URL(string: "http://192.168.1.1/mcp")!))
+        #expect(MCPClient.validEndpoint(URL(string: "http://192.168.1.1/mcp")!))
         #expect(!MCPClient.validEndpoint(URL(string: "https://example.com/mcp?token=secret")!))
         #expect(MCPClient.validEndpoint(URL(string: "http://127.0.0.1:1234/mcp")!))
         var unsupported = syntheticTool
@@ -481,6 +481,25 @@ private actor WorkWireDouble {
 }
 
 @MainActor @Suite struct VoiceAssistantSessions {
+    @Test func anEchoDraftRetainsItsReferenceAcrossAQuietPlayerCallback() async throws {
+        let (session, model, voice, _) = try setup(withTools: false)
+        defer { session.stop() }
+        await model.configure(output: "Ich prüfe die synthetische Quelle und erkläre danach das Ergebnis.")
+        session.setDuplexListening(true)
+        try await wait { session.ready }
+        session.submit("Look up the synthetic source.")
+        try await wait { session.audible }
+        let response = try #require(voice.spoken.first?.1), stops = voice.stops
+        session.receive(heard(90, "Ich", final: false))
+        voice.playoutChanged?(response, false)
+        session.receive(heard(90, "Ich prüfe.", final: true, revision: 2))
+        #expect(session.modelRequests == 1 && voice.stops == stops)
+        // A different continuation must still interrupt, even with that same ASR ID.
+        session.receive(heard(90, "Ich möchte eine andere Frage stellen.", final: true, revision: 3))
+        try await wait { session.modelRequests == 2 }
+        #expect(session.lastUser == "Ich möchte eine andere Frage stellen." && voice.stops > stops)
+    }
+
     @Test func singleFinalPlaybackEchoIsConsumedAndAnUncertainPartialDoesNotImmediatelyCutAudio() async throws {
         let (session, model, voice, _) = try setup(withTools: false)
         defer { session.stop() }

@@ -27,3 +27,19 @@ On memory-constrained devices, `voice_prepare` separates queue wait (`queue_wait
 The standalone `ios/Tools/bench-voice-trace.swift` compiles with the actual writer and opens no app, microphone, speaker, model or network connection. It checks 800 concurrent unique events plus an existing record, explicit overflow accounting, and recovery after a write failure. Its timing loop compares the previous synchronous append with background admission and completed writes separately.
 
 One macOS run, nine samples of 100 pre-serialized synthetic events each: median synchronous caller time 1.925 ms; new caller admission 0.031 ms; new complete-write time 2.093 ms. Total disk work has not become faster. The change moves that work off the calling executor and serializes concurrent writes. These measurements establish neither phone timing nor end-to-end voice latency.
+
+## Conversation reliability and local MCP
+
+Checked on 28 November 2026 with eight targeted physical-iPhone checks: four cover bounded quoted memory checkpoints, topic isolation, supported utterance-language selection and local endpoint validation; four cover echo fragments and real interruption/correction behavior. All eight passed without physical microphone input or speaker playback. They do not establish subjective accent quality or end-to-end latency.
+
+The local checkpoint is saved before requesting an optional model summary. It contains bounded, JSON-quoted user statements, explicitly labelled as unverified quotations rather than completed actions; assistant claims are excluded. A failed summary leaves the checkpoint intact.
+
+Supertonic output language is detected per utterance using on-device NaturalLanguage, restricted to the SDK's supported codes. Short/uncertain fragments retain the topic language. This does not change the recognition language and does not add languages to Pocket or Qwen.
+
+HTTP MCP endpoints can use private IPv4/IPv6 addresses, loopback, unqualified local hostnames and `.local` names. Public HTTP destinations, URL credentials, queries and fragments remain rejected. Redirects remain disabled. The app already declares local-network usage and `NSAllowsLocalNetworking`; Apple's current behavior is documented in [NSAllowsLocalNetworking](https://developer.apple.com/documentation/bundleresources/information-property-list/nsapptransportsecurity/nsallowslocalnetworking), verified 28 November 2026. The connection editor explains that local HTTP sends tool data and server tokens without transport encryption.
+
+`NativeLocalMCPSetup` is separate owner-authorized device maintenance, disabled in ordinary tests. It requires an explicit `LISTEN_PROVISION_LOCAL_MCP=1` environment flag and a protected app-cache setup file. It performs discovery, stores the server token through the device's credential backend, and binds capabilities to the selected voice topic. It never calls an action or adds standing grants, and removes the supplied cache file on exit. Real setup files and credentials do not belong in this repository.
+
+The live conversation settings show configured answer-model roles and native tool availability. These are configuration facts, not a claim that every model is called on every turn. `NativeVoiceRoutingSetup` is a separately opted-in owner setup check: it sends only tiny synthetic connection requests through the existing adapters, verifies a typed routing response, and enables only the model slots it checked. Single connection timings are not comparative model benchmarks or a voice-quality score.
+
+Decision, 28 November 2026: local-network MCP access belongs in the generic Listen client. Home-automation server implementations, deployment settings, device lists and client credentials remain separate from this public source tree.

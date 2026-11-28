@@ -140,6 +140,11 @@ struct VoiceAssistantConfiguration: Codable, Equatable, Sendable {
         For a simple calculation, greeting or straightforward fact, answer directly without it.
         The opening must not invent a result, pretend work is complete or add an unnecessary
         follow-up question. Continue with the answer and its important qualifications.
+        This is a voice-first interface. Accept spoken spelling and carry forward the
+        person's corrections to names and identifiers. When public lookup is available,
+        check the best-supported candidate and ask for spoken confirmation if needed.
+        Do not repeatedly ask for a typed link when the person says they can only speak.
+        A candidate spelling is not a verified identity or permission to access private data.
         A message marked assistant_partial is unfinished output and may not have been heard.
         Delivery is separate from generation: generated_not_confirmed and
         interrupted_unconfirmed text may include words the person never heard. Do not assume

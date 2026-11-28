@@ -15,7 +15,7 @@ struct MCPAccountSection: View {
                 .disabled(store.problem != nil)
             if let problem = store.problem { Text(problem).foregroundStyle(.red) }
         } header: { Text("Voice assistant tools") } footer: {
-            Text("Connect your own external service. Choose its tools here, then add their capability IDs to a Voice assistant system. Each use asks for confirmation unless you explicitly allow it beforehand. HTTP is supported only on loopback; use HTTPS for another machine.")
+            Text("Connect your own service over HTTPS or use HTTP on your local network. Choose its tools here, then add their capability IDs to a Voice assistant system. Each use asks for confirmation unless you explicitly allow it beforehand.")
         }
     }
 }
@@ -50,8 +50,12 @@ private struct MCPServerEditor: View {
         Form {
             Section("Your server") {
                 TextField("Name", text: $draft.name)
-                TextField("HTTPS MCP endpoint", text: $endpoint)
+                TextField("MCP endpoint", text: $endpoint)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
+                if URL(string: endpoint)?.scheme == "http" {
+                    Text("HTTP sends the server token and tool data unencrypted on your local network.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Picker("Protocol version", selection: $draft.revision) {
                     ForEach(MCPRevision.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }

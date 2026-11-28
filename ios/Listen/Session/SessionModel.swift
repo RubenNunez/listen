@@ -468,6 +468,10 @@ final class SessionModel {
             var note = TopicSandbox.Conversation(topic: topic.name, began: began, seconds: capturedFrames / 10,
                 people: [], cards: [], sentences: core.allSpeech.filter(\.isFinal).count,
                 runID: recordedTo?.lastPathComponent ?? recorder?.directory.lastPathComponent)
+            // Commit useful local memory before starting optional remote work. An expired
+            // deadline or background suspension must not erase this conversation's continuity.
+            note.summary = assistant.memoryCheckpoint()
+            savedNote = sandbox.write(note)
             let prompt = runningSystem?.configuration?.prompts.summary ?? SystemConfig().prompts.summary
             pendingNotes += 1
             Task {

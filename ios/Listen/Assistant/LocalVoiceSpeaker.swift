@@ -218,7 +218,11 @@ extension LocalVoicePlayback { func retire() { stop() } }
                     // turn a continuing clause into a new utterance with broken prosody.
                     let parts: [String]
                     let family = TalkBack.model(model)?.family
-                    if bufferingMode == .sentences, family == .pocket || family == .supertonic {
+                    if family == .supertonic {
+                        // Supertonic selects the output language before expanding numbers.
+                        // Pre-expanding here would turn Spanish digits into German words.
+                        parts = [text]
+                    } else if bufferingMode == .sentences, family == .pocket {
                         parts = [SpokenReply.spelledOut(text, language: language)]
                     } else {
                         parts = bufferingMode == .sentences ? SpokenReply.segments(text, language: language).map(\.text) : [text]

@@ -342,6 +342,9 @@ struct LiveVoiceSettings: View {
     let canPreviewPulse: Bool
     let choose: (AssistantVoiceChoice) throws -> Void
     let sample: () -> Void
+    var models: [String: String] = [:]
+    var tools: [String] = []
+    var missingTools: [String] = []
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -352,8 +355,25 @@ struct LiveVoiceSettings: View {
                         canSample: canSample, canPreviewPulse: canPreviewPulse, choose: choose, sample: sample)
                     LocalVoiceNotice(configuration: configuration)
                 }
+                if !models.isEmpty {
+                    Section("Answering models") {
+                        ForEach(models.keys.sorted(), id: \.self) { role in
+                            LabeledContent(role.replacingOccurrences(of: "_", with: " ").capitalized,
+                                           value: models[role] ?? "")
+                        }
+                    }
+                }
+                Section("Tools in this topic") {
+                    LabeledContent("Available", value: String(tools.count))
+                    ForEach(tools, id: \.self) { Text($0).font(.caption) }
+                    ForEach(missingTools, id: \.self) { Text("Unavailable: \($0)").foregroundStyle(.secondary) }
+                    if tools.isEmpty && missingTools.isEmpty {
+                        Text("Add a connection and select its tools in this topic's system settings.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             }
-            .navigationTitle("Voice settings")
+            .navigationTitle("Conversation settings")
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
         .onDisappear { @Sendable [preview] in Task { @MainActor in preview.stop() } }
