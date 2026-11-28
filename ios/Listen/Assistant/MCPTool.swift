@@ -131,6 +131,11 @@ enum AssistantToolFeedback {
         func text(_ en: String, _ de: String) -> String { language == .de ? de : en }
         switch result {
         case .succeeded(let detail), .failed(let detail):
+            if let object = structured(detail), object["outcome"] == .string("tv_unreachable") {
+                // A lost connection says nothing about whether earlier playback
+                // started, or whether a title/language is available. Never retry.
+                return text("I can't reach the TV right now.", "Ich kann den Fernseher gerade nicht erreichen.")
+            }
             if let offer = languageOffer(detail, arguments: arguments, language: language) { return offer }
         default: break
         }
