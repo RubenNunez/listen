@@ -259,3 +259,22 @@ The probe passed in 4.410 seconds; this is test duration, not conversational lat
 The same 39 combined native regressions also passed on build 57. Signed iOS and Mac
 Catalyst test builds succeeded. The fixture and receipts remain outside version control.
 This does not establish physical microphone, echo-cancellation or speaker quality.
+
+### Completed input at the mute boundary
+
+Implementation decision, 28 November 2026: microphone mute also closes a wholly
+finalized pending turn through the normal conversation path. Previously those
+sentences could be discarded while still waiting for an acoustic pause. Any
+unfinished segment prevents this submission: removing an unfinished correction
+could change an action's scope. A continuation borrowing a previously committed
+prefix is also discarded conservatively. Repeated mute calls and late recognition
+of already consumed words do not create another request. Tool permissions remain
+unchanged.
+
+The unchanged-draft-to-final regression failed before this correction. The final
+Mac Catalyst test build and ten targeted native checks passed, including finalized
+input, incomplete corrections, repeated input, ongoing generation/playback, pause
+behavior and the physical-microphone test guard. Models, tools and speakers in the
+conversation tests are synthetic. This checks turn handoff, not acoustic accuracy
+or conversational latency. Installed build 57 does not contain this correction;
+physical iPhone acceptance remains pending.

@@ -1882,6 +1882,126 @@ private actor WorkWireDouble {
         try await wait { session.modelRequests == 2 }
     }
 
+    @Test func mutingCommitsFullyRecognizedSentencesOnce() async throws {
+        let (session, model, _, wire) = try setup(withTools: false)
+        defer { session.stop() }
+        await model.configure(output: "A synthetic reply.", suspended: true)
+        try await wait { session.ready }
+        session.setDuplexListening(true)
+        session.heardQuiet(for: 0)
+        session.receive(heard(101, "Explain the selected example.", final: true))
+        session.receive(heard(102, "Use the second version.", final: true))
+        #expect(await model.inputs.isEmpty)
+
+        session.setMicrophoneMuted(true)
+        try await wait { session.modelRequests == 1 }
+        #expect(session.lastUser == "Explain the selected example. Use the second version.")
+        #expect(session.microphoneMuted && !session.hearing)
+        #expect(await wire.calls == 0, "muting does not bypass the normal model/tool permissions")
+        session.receive(heard(103, "Must stay discarded.", final: true, revision: 2))
+        session.setMicrophoneMuted(true)
+        session.setMicrophoneMuted(false)
+        session.heardQuiet(for: 5)
+        #expect(session.modelRequests == 1)
+    }
+
+    @Test func mutingAnUnfinishedDraftDoesNotSubmitIt() async throws {
+        let (session, model, _, _) = try setup(withTools: false)
+        defer { session.stop() }
+        try await wait { session.ready }
+        session.setDuplexListening(true)
+        session.heardQuiet(for: 0)
+        session.receive(heard(104, "An unfinished draft", final: false))
+        session.setMicrophoneMuted(true)
+        session.setMicrophoneMuted(false)
+        session.heardQuiet(for: 5)
+        #expect(await model.inputs.isEmpty)
+        #expect(session.lastUser.isEmpty && !session.hearing)
+    }
+
+    @Test func finalizingAnUnchangedDraftBeforeMutePreservesIt() async throws {
+        let (session, model, _, _) = try setup(withTools: false)
+        defer { session.stop() }
+        await model.configure(output: "A synthetic reply.")
+        try await wait { session.ready }
+        session.setDuplexListening(true)
+        session.heardQuiet(for: 0)
+        session.receive(heard(105, "Explain the example.", final: false))
+        session.receive(heard(105, "Explain the example.", final: true, revision: 2))
+        session.setMicrophoneMuted(true)
+        try await wait { session.modelRequests == 1 }
+        #expect(session.lastUser == "Explain the example.")
+    }
+
+    @Test func mutingDoesNotCommitWordsAfterAnUnfinishedGap() async throws {
+        let (session, model, _, _) = try setup(withTools: false)
+        defer { session.stop() }
+        try await wait { session.ready }
+        session.setDuplexListening(true)
+        session.heardQuiet(for: 0)
+        session.receive(heard(106, "An unfinished earlier clause", final: false))
+        session.receive(heard(107, "A later final sentence.", final: true))
+        session.setMicrophoneMuted(true)
+        session.setMicrophoneMuted(false)
+        session.heardQuiet(for: 5)
+        #expect(await model.inputs.isEmpty, "do not silently remove a gap from an instruction")
+    }
+
+    @Test func mutingDoesNotDropAnUnfinishedConstraintFromAFinalSentence() async throws {
+        let (session, model, _, wire) = try setup()
+        defer { session.stop() }
+        try await wait { session.ready }
+        session.setDuplexListening(true)
+        session.heardQuiet(for: 0)
+        session.receive(heard(110, "Turn off all the synthetic lamps.", final: true))
+        session.receive(heard(111, "No, only in the demo room", final: false))
+        session.setMicrophoneMuted(true)
+        session.setMicrophoneMuted(false)
+        session.heardQuiet(for: 5)
+        #expect(await model.inputs.isEmpty)
+        #expect(session.pending.isEmpty && session.lastUser.isEmpty)
+        #expect(await wire.calls == 0, "a truncated correction must never widen an action")
+    }
+
+    @Test func aRevisedUnfinishedSentenceIsNotCommittedByMute() async throws {
+        let (session, model, _, _) = try setup(withTools: false)
+        defer { session.stop() }
+        try await wait { session.ready }
+        session.setDuplexListening(true)
+        session.heardQuiet(for: 0)
+        session.receive(heard(108, "Explain the example.", final: true))
+        session.receive(heard(108, "Explain the example, but", final: false, revision: 2))
+        session.setMicrophoneMuted(true)
+        session.setMicrophoneMuted(false)
+        session.heardQuiet(for: 5)
+        #expect(await model.inputs.isEmpty)
+    }
+
+    @Test func mutingNeverResubmitsAnEarlierCommittedPrefix() async throws {
+        var clock = 0.0
+        let (session, model, _, _) = try setup(withTools: false, now: { clock })
+        defer { session.stop() }
+        await model.configure(output: "A synthetic reply.", suspended: true)
+        try await wait { session.ready }
+        session.setDuplexListening(true)
+        session.heardQuiet(for: 0)
+        session.receive(heard(109, "Explain the example", final: false))
+        clock = 1
+        session.heardQuiet(for: 1)
+        try await wait { session.modelRequests == 1 }
+        session.receive(heard(109, "Explain the example", final: true, revision: 2))
+        session.setMicrophoneMuted(true)
+        session.setMicrophoneMuted(false)
+        #expect(session.modelRequests == 1, "a late final of consumed words is not a new request")
+        session.heardQuiet(for: 0)
+        session.receive(heard(109, "Explain the example in French.", final: true, revision: 3))
+        session.setMicrophoneMuted(true)
+        session.setMicrophoneMuted(false)
+        session.heardQuiet(for: 5)
+        #expect(session.modelRequests == 1, "a borrowed prefix is not a wholly finalized new turn")
+        #expect(session.lastUser == "Explain the example")
+    }
+
     @Test func identicalPendingPermissionIsShownOnceAndDispatchesOnce() async throws {
         let (session, _, _, wire) = try setup()
         defer { session.stop() }
