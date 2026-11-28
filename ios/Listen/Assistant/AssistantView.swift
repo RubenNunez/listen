@@ -203,7 +203,7 @@ struct AssistantView: View {
 
     private func permission(_ request: ConversationOperationRequest) -> some View {
         AssistantPermissionCard(request: request,
-            toolName: assistant.tools.first { $0.capability == request.capability }?.descriptor.name,
+            tool: assistant.tools.first { $0.capability == request.capability }?.descriptor,
             language: assistant.language,
             allow: { remember in assistant.decide(request, allow: true, alwaysAllow: remember) }, deny: { assistant.decide(request, allow: false) })
     }
@@ -257,7 +257,7 @@ struct AssistantView: View {
 
 private struct AssistantPermissionCard: View {
     let request: ConversationOperationRequest
-    let toolName: String?
+    let tool: MCPTool?
     let language: Language
     let allow: (Bool) -> Void
     let deny: () -> Void
@@ -266,12 +266,12 @@ private struct AssistantPermissionCard: View {
 
     private var german: Bool { language == .de }
     private var light: Bool {
-        ["HassTurnOn", "HassTurnOff"].contains(toolName ?? "") && request.arguments["domain"] == .array([.string("light")])
+        ["HassTurnOn", "HassTurnOff"].contains(tool?.name ?? "") && request.arguments["domain"] == .array([.string("light")])
             && Set(request.arguments.keys).isSubset(of: ["name", "area", "floor", "domain", "device_class"])
     }
-    private var turningOff: Bool { toolName == "HassTurnOff" }
+    private var turningOff: Bool { tool?.name == "HassTurnOff" }
     private var title: String {
-        guard light else { return german ? "Aktion ausführen?" : "Allow this action?" }
+        guard light else { return ActionConfirmationPresentation.heading(for: tool, language: language) }
         return turningOff ? (german ? "Lichter ausschalten?" : "Switch off the lights?")
             : (german ? "Lichter einschalten?" : "Switch on the lights?")
     }
@@ -304,7 +304,7 @@ private struct AssistantPermissionCard: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(german ? "BESTÄTIGUNG" : "CONFIRMATION")
                         .font(.system(size: 10, weight: .semibold)).tracking(1.5).foregroundStyle(.secondary)
-                    Text(title).font(.title3.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
+                    Text(verbatim: title).font(.title3.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
                     Text(target).font(.subheadline).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }

@@ -323,3 +323,19 @@ Twenty targeted receipt/identity checks passed afterward against the actual
 Foundation decoder source, including null/true/false playback metadata and
 malformed receipts. No app, microphone, model, network or player was started by
 these checks. This is contract validation, not a live reachability benchmark.
+
+### Human-readable action headings
+
+Generic action confirmations use a bounded, literal display label. Optional tool
+`title` takes precedence over `annotations.title`, then the original `name`, as in
+the [official MCP schema](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/schema/2026-07-28/schema.ts)
+(verified 28 November 2026). Annotation permission hints are not imported. Empty,
+oversized or control-bearing labels fall back; markup is plain text, not formatting.
+Missing or malformed optional cached display fields do not replace execution IDs,
+schemas or saved grants. Explicit light confirmations keep their existing wording.
+
+Twenty-four Foundation checks passed, including display precedence, legacy cache
+decoding, malformed metadata, typed argument validation and existing playback
+receipts. These use the production decoder/presentation source without an app,
+microphone, model or device action. Running-window appearance and accessibility
+acceptance remain separate from these contract checks.
