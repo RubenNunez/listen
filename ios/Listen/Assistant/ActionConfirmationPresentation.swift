@@ -3,6 +3,11 @@ import Foundation
 /// A display-only projection. The original typed arguments remain the gateway's
 /// decision data, and the confirmation's details retain their exact JSON form.
 enum ActionConfirmationPresentation {
+    static func heading(for tool: MCPTool?, language: Language) -> String {
+        guard let tool else { return language == .de ? "Aktion ausführen?" : "Allow this action?" }
+        return language == .de ? "„\(tool.displayName)“ ausführen?" : "Allow “\(tool.displayName)”?"
+    }
+
     struct Field: Identifiable, Equatable {
         let key: String
         let label: String

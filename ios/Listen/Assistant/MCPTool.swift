@@ -4,11 +4,33 @@ struct MCPTool: Codable, Equatable, Sendable {
     var name: String
     var description: String
     var inputSchema: [String: HarnessValue]
+    var title: String?
+    var annotations: DisplayAnnotations?
+
+    /// Only display metadata is retained, never annotation-based permissions.
+    struct DisplayAnnotations: Codable, Equatable, Sendable {
+        var title: String?
+    }
+
+    var displayName: String {
+        Self.displayLabel(title) ?? Self.displayLabel(annotations?.title) ?? Self.displayLabel(name) ?? "Tool"
+    }
+
+    private static func displayLabel(_ raw: String?) -> String? {
+        guard let raw, raw.utf8.count <= 512, raw.count <= 120,
+              raw.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) else { return nil }
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
 
     static func read(_ value: HarnessValue) throws -> Self {
         guard let object = value.object, let name = object["name"]?.string,
               !name.isEmpty, name.utf8.count <= 128, let schema = object["inputSchema"]?.object else { throw MCPFailure.invalidResponse }
         var tool = Self(name: name, description: String((object["description"]?.string ?? "").prefix(1000)), inputSchema: schema)
+        tool.title = Self.displayLabel(object["title"]?.string)
+        if let annotations = object["annotations"]?.object {
+            tool.annotations = .init(title: Self.displayLabel(annotations["title"]?.string))
+        }
         if tool.needsExplicitDomain, tool.fields != nil {
             tool.inputSchema["required"] = .array(tool.required.sorted().map(HarnessValue.string))
         }
@@ -110,6 +132,29 @@ struct MCPTool: Codable, Equatable, Sendable {
             if !values.allSatisfy({ accepts($0, schema: items) }) { return false }
         }
         return true
+    }
+}
+
+extension MCPTool {
+    private enum CodingKeys: String, CodingKey { case name, description, inputSchema, title, annotations }
+
+    /// Old cached descriptors have no display fields. Malformed optional hints
+    /// must not invalidate an otherwise unchanged tool or its saved identity.
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        name = try values.decode(String.self, forKey: .name)
+        description = try values.decode(String.self, forKey: .description)
+        inputSchema = try values.decode([String: HarnessValue].self, forKey: .inputSchema)
+        title = try? values.decodeIfPresent(String.self, forKey: .title)
+        annotations = try? values.decodeIfPresent(DisplayAnnotations.self, forKey: .annotations)
+    }
+}
+
+extension MCPTool.DisplayAnnotations {
+    private enum CodingKeys: String, CodingKey { case title }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        title = try? values.decodeIfPresent(String.self, forKey: .title)
     }
 }
 
