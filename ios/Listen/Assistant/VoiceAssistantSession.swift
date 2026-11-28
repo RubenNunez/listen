@@ -897,9 +897,7 @@ final class VoiceAssistantSession {
                 if coalescedOperations.remove(id) != nil { scheduledOperations.remove(id); continue }
                 if result.wasDispatched { observedToolVersion += 1 }
                 let request = state.operation(id)?.request
-                let tool = tools.first { $0.capability == request?.capability }?.descriptor.name
-                guard let text = AssistantToolFeedback.speech(for: result, tool: tool,
-                    arguments: request?.arguments ?? [:], language: topic.language, variant: AssistantToolFeedback.variant(for: id)) else { continue }
+                guard let text = AssistantToolFeedback.speech(for: result, language: topic.language) else { continue }
                 let detail: String?
                 switch result {
                 case .succeeded(let raw), .failed(let raw): detail = raw
@@ -1552,8 +1550,7 @@ final class VoiceAssistantSession {
                     }
                     try Task.checkCancellation()
                     guard active, state.response(root)?.status == .generating, let result = state.operation(id)?.state else { throw CancellationError() }
-                    let toolName = available[call.tool]?.name
-                    let feedback = AssistantToolFeedback.speech(for: result, tool: toolName, arguments: call.arguments, language: topic.language, variant: AssistantToolFeedback.variant(for: id)) ?? localized("No confirmed tool result is available.", "Es liegt kein bestätigtes Werkzeugergebnis vor.")
+                    let feedback = AssistantToolFeedback.speech(for: result, language: topic.language) ?? localized("No confirmed tool result is available.", "Es liegt kein bestätigtes Werkzeugergebnis vor.")
                     let detail: String
                     if case .succeeded(let observed) = result { detail = String(observed.prefix(8000)) }
                     else { return .init(id: work.id, text: feedback, succeeded: false) }
