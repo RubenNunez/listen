@@ -150,7 +150,7 @@ final class VoiceAssistantSession {
     @ObservationIgnored private var noteStarted = false
     @ObservationIgnored private var earlySpeech: [UInt64: TranscriptSegment] = [:]
     /// The person's turn so far, by recogniser segment, until a pause ends it (`heardQuiet`).
-    @ObservationIgnored private var turn: [(segment: UInt64, text: String, recognizedWords: [String])] = []
+    @ObservationIgnored private var turn: [(segment: UInt64, text: String, recognizedWords: [String], isFinal: Bool)] = []
     @ObservationIgnored private var turnPrefix: String?
     @ObservationIgnored private var turnRevision = 0
     @ObservationIgnored private var turnSpeaker = SpeakerLabel.unknown
@@ -631,12 +631,15 @@ final class VoiceAssistantSession {
             turnPrefix = previous.text
         }
         let index = turn.firstIndex { $0.segment == segment.segmentID }
+        // A final result can contain exactly the same words as its draft.
+        // Keep its completion state even when no text revision is needed.
+        if let index { turn[index].isFinal = segment.isFinal }
         hearing = true
         if index.map({ turn[$0].text != fresh }) ?? true {
             if let index {
                 turn[index].text = fresh
                 turn[index].recognizedWords = words
-            } else { turn.append((segment.segmentID, fresh, words)) }
+            } else { turn.append((segment.segmentID, fresh, words, segment.isFinal)) }
             turnSpeaker = segment.speaker
             turnChangedAt = now()
             turnRevision += 1
@@ -758,8 +761,19 @@ final class VoiceAssistantSession {
     }
 
     func setMicrophoneMuted(_ muted: Bool) {
+        guard microphoneMuted != muted else { return }
         microphoneMuted = muted
-        // Keep committed requests, playback and concrete operation receipts alive.
+        // Muting closes the person's input. Finished sentences may still be waiting
+        // for an acoustic pause, especially in a noisy room: do not silently lose
+        // them. Submit a completely finalized turn through the normal turn/permission
+        // path. Never drop an unfinished correction or constraint from that turn.
+        // A late continuation borrowing an earlier committed prefix is not a
+        // new, wholly finalized turn. Keep the conservative discard for that case.
+        if muted, active, ready, !paused, turnPrefix == nil, !turn.isEmpty, turn.allSatisfy(\.isFinal) {
+            record?("voice_turn_boundary", ["reason": "microphone_muted", "sentences": turn.count])
+            endTurn()
+        }
+        // Keep generation, playback and concrete operation receipts alive.
         turn.removeAll()
         turnPrefix = nil
         finishing = nil
