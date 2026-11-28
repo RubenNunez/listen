@@ -74,4 +74,20 @@ import Testing
         }
     }
 
+    @Test func verifiedAudioWithFailedPlaybackIsNotLanguageUnavailability() {
+        let raw = #"{"outcome":"playback_failed","audio_verified":true,"attempted_audio_language":"de","playback_started":false,"speech":"Read this diagnostic instruction","player":{"state":"error","error":"TypeMismatchError"}}"#
+        let response = AssistantToolFeedback.speech(for: .failed(detail: raw), tool: "media_play", arguments: ["audio_language": .string("de")], language: .de)
+        #expect(response == "Die Tonspur auf Deutsch ist vorhanden, aber die Wiedergabe konnte nicht gestartet werden.")
+        #expect(response?.contains("TypeMismatch") == false && response?.contains("instruction") == false)
+        let closed = raw.replacingOccurrences(of: "\"state\":\"error\"", with: "\"state\":\"idle\"")
+        #expect(AssistantToolFeedback.speech(for: .failed(detail: closed), tool: "media_play", arguments: [:], language: .de) == response)
+    }
+
+    @Test func unverifiedOrUnknownAudioDoesNotClaimALanguageOrOfferFallback() {
+        for fields in [#""audio_verified":false,"attempted_audio_language":"de""#, #""audio_verified":true,"attempted_audio_language":"unknown""#] {
+            let raw = "{\"outcome\":\"playback_failed\",\"playback_started\":false,\"player\":{\"state\":\"error\"},\(fields)}"
+            #expect(AssistantToolFeedback.speech(for: .failed(detail: raw), tool: "media_play", arguments: [:], language: .de) == "Die Wiedergabe konnte nicht gestartet werden.")
+        }
+    }
+
 }

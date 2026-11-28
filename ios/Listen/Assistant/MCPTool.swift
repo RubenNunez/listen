@@ -195,6 +195,7 @@ enum AssistantToolFeedback {
             }
             return text("The service has responded. Details are available in the app.", "Die Rückmeldung ist da. Die Details findest du in der App.")
         case .failed(let detail):
+            if let playback = playbackFailure(detail, language: language) { return playback }
             if let clarification = titleClarification(detail, language: language) { return clarification }
             // Classify a short service error, never narrate its payload or instructions.
             if needsClarification(detail) {
@@ -253,6 +254,19 @@ enum AssistantToolFeedback {
             subject += language == .de ? " Als Ersatzsprache." : " Using the fallback language."
         }
         return subject
+    }
+
+    /// A verified track plus a failed player start is not a missing-language result.
+    private static func playbackFailure(_ raw: String, language: Language) -> String? {
+        guard let object = structured(raw), object["outcome"] == .string("playback_failed"),
+              object["playback_started"] == .bool(false) else { return nil }
+        if object["audio_verified"] == .bool(true),
+           let code = object["attempted_audio_language"]?.string, let audio = languageName(code, language: language) {
+            return language == .de
+                ? "Die Tonspur auf \(audio) ist vorhanden, aber die Wiedergabe konnte nicht gestartet werden."
+                : "The \(audio) audio track is available, but playback could not start."
+        }
+        return language == .de ? "Die Wiedergabe konnte nicht gestartet werden." : "Playback could not start."
     }
 
     private static func titleClarification(_ raw: String, language: Language) -> String? {
