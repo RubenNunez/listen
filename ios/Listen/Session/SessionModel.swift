@@ -498,6 +498,7 @@ final class SessionModel {
             // Commit useful local memory before starting optional remote work. An expired
             // deadline or background suspension must not erase this conversation's continuity.
             note.summary = assistant.memoryCheckpoint()
+            note.contextStatements = assistant.contextStatements()
             savedNote = sandbox.write(note)
             let prompt = runningSystem?.configuration?.prompts.summary ?? SystemConfig().prompts.summary
             pendingNotes += 1
@@ -770,7 +771,9 @@ final class SessionModel {
                         client: RoutedClient(local: plan.hasLocal ? LocalModelClient() : nil,
                             remote: plan.key.map { OpenRouterClient(key: $0) }, direct: plan.direct),
                         model: model, speaker: TalkBack.speaker(for: conversation), toolStore: toolStore, budgetUSD: plan.settings.limitUSD,
-                        context: AssistantContext(material: TopicMaterial(topic: topic.id).index, earlier: TopicSandbox(topic: topic.id).context()),
+                        context: AssistantContext(material: TopicMaterial(topic: topic.id).index,
+                            earlier: conversation.keepNotes ? TopicSandbox(topic: topic.id).context() : "",
+                            earlierStatements: conversation.keepNotes ? TopicSandbox(topic: topic.id).contextStatements() : []),
                         openingModel: conversation.openingModel.isEmpty ? plan.settings.drafters.first(where: { $0 != model }) : conversation.openingModel,
                         openingReviewer: plan.settings.decisionClient)
                 }

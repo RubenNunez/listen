@@ -217,6 +217,10 @@ final class VoiceAssistantSession {
         self.modelTimeout = modelTimeout
         self.budgetUSD = budgetUSD
         self.context = context
+        if !configuration.keepNotes {
+            self.context.earlier = ""
+            self.context.earlierStatements = []
+        }
         state = ConversationState(binding: .init(session: .init(UUID().uuidString), topic: topic.id,
             system: system.id, systemSnapshot: HarnessJSON.hash(Data((system.configuration ?? SystemConfig()).json.utf8))))
         connectSpeaker()
@@ -949,13 +953,14 @@ final class VoiceAssistantSession {
                 "source_repository": .string("https://github.com/RubenNunez/listen"),
                 "source_repository_user_ownership": .string("unknown"),
                 "topic_memory_enabled": .bool(configuration.keepNotes),
-                "memory_policy": .string(configuration.keepNotes ? "local_user_checkpoint_before_optional_summary" : "disabled"),
+                "memory_policy": .string(configuration.keepNotes ? "local_user_checkpoint_and_source_quotes_before_optional_summary" : "disabled"),
                 "selected_repositories": .array(topic.repositories.map(HarnessValue.string))]),
             "public_web_search": .object(["available_to_answer_workers": .bool(hasPublicWeb)]),
             "local_workflows": .object(["kind": .string("action_wait_action"), "maximum_wait_seconds": .number(30),
                 "scope": .string("active_conversation_only"), "running": .array(localSequences.map { .object([
                     "request": .string($0.request), "status": .string($0.waitingUntil == nil ? "running" : "waiting")]) })]),
             "messages": .array(Array(history.suffix(16))),
+            "working_context": AssistantWorkingContext.payload(messages: history, request: turn.text, earlier: context.earlierStatements),
             "tools": .array(tools.map { .object(["id": .string($0.capability.rawValue), "description": .string($0.descriptor.description), "inputSchema": .object($0.descriptor.inputSchema)]) }),
             "unavailableTools": .array(missing.map(HarnessValue.string)),
             "recent_actions": .array(state.operations.suffix(8).map { operation in
@@ -1669,6 +1674,7 @@ final class VoiceAssistantSession {
         preparationTask?.cancel()
         let epoch = preparationEpoch
         let payload: HarnessValue = .object(["topic": .string(topic.name), "language": .string(topic.language.rawValue),
+            "working_context": AssistantWorkingContext.payload(messages: history, request: utterance, earlier: context.earlierStatements),
             "latest_user": .string(utterance), "generated_answer": .string(String(answer.prefix(3000))),
             "source_addresses_only": .array(sources.prefix(5).map { .string($0.absoluteString) })])
         preparationTask = Task { [weak self] in
@@ -2021,6 +2027,10 @@ final class VoiceAssistantSession {
     /// Post-stop text only: no tools, playback or changes to conversation state.
     func memoryCheckpoint() -> String? {
         AssistantMemoryCheckpoint.text(messages: history, language: topic.language)
+    }
+
+    func contextStatements() -> [String] {
+        configuration.keepNotes ? AssistantWorkingContext.retainedStatements(history) : []
     }
 
     /// Optional enhancement of the already-saved local checkpoint.

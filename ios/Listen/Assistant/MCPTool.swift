@@ -195,7 +195,13 @@ enum AssistantToolFeedback {
             }
             return text("The service has responded. Details are available in the app.", "Die Rückmeldung ist da. Die Details findest du in der App.")
         case .failed(let detail):
+            if let playback = playbackFailure(detail, language: language) { return playback }
             if let clarification = titleClarification(detail, language: language) { return clarification }
+            if let object = structured(detail), object["outcome"] == .string("episode_unavailable"),
+               object["playback_started"] == .bool(false) {
+                return text("The requested season or episode is not available there.",
+                            "Die angefragte Staffel oder Folge ist dort nicht verfügbar.")
+            }
             // Classify a short service error, never narrate its payload or instructions.
             if needsClarification(detail) {
                 return text("The service could not identify the selection uniquely. Can you be more specific?",
@@ -259,6 +265,19 @@ enum AssistantToolFeedback {
             subject += language == .de ? " Als Ersatzsprache." : " Using the fallback language."
         }
         return subject
+    }
+
+    /// A verified track plus a failed player start is not a missing-language result.
+    private static func playbackFailure(_ raw: String, language: Language) -> String? {
+        guard let object = structured(raw), object["outcome"] == .string("playback_failed"),
+              object["playback_started"] == .bool(false) else { return nil }
+        if object["audio_verified"] == .bool(true),
+           let code = object["attempted_audio_language"]?.string, let audio = languageName(code, language: language) {
+            return language == .de
+                ? "Die Tonspur auf \(audio) ist vorhanden, aber die Wiedergabe konnte nicht gestartet werden."
+                : "The \(audio) audio track is available, but playback could not start."
+        }
+        return language == .de ? "Die Wiedergabe konnte nicht gestartet werden." : "Playback could not start."
     }
 
     /// Compare supplied identities only. Missing legacy metadata is not an invented
@@ -326,13 +345,20 @@ enum AssistantToolFeedback {
     private static func titleClarification(_ raw: String, language: Language) -> String? {
         guard let object = structured(raw), object["outcome"] == .string("ambiguous_title"),
               object["playback_started"] != .bool(true), case .array(let choices) = object["choices"],
-              (2...20).contains(choices.count) else { return nil }
+              (1...20).contains(choices.count) else { return nil }
         let labels = choices.prefix(3).compactMap { value -> String? in
             guard let choice = value.object, let name = mediaLabel(choice["name"]?.string),
                   let year = releaseStartYear(choice["releaseInfo"]?.string) else { return nil }
             return "\(name) (\(year))"
         }
         guard labels.count == min(3, choices.count), Set(labels).count == labels.count else { return nil }
+        if choices.count == 1 {
+            // A single alias candidate still reports a pending title clarification,
+            // never a service outage, successful playback or permission to retry.
+            return language == .de
+                ? "Ich habe „\(labels[0])“ als passenden Titel gefunden. Meinst du diesen?"
+                : "I found \"\(labels[0])\" as a matching title. Is that the one you mean?"
+        }
         let options = labels.joined(separator: language == .de ? " oder " : " or ")
         return language == .de ? "Ich habe mehrere passende Serien gefunden: \(options). Welche meinst du?" : "I found several matching series: \(options). Which one do you mean?"
     }

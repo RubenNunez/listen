@@ -142,6 +142,15 @@ instructions are never narrated. Generic Home Assistant on/off tools require a n
 explicit domain when their schema offers a domain array; execution supplies no guessed
 device type or all-device default.
 
+A single validated title candidate is presented as a clarification, rather than a
+service failure or a playback confirmation. A structured `episode_unavailable` result
+with `playback_started: false` explains that the requested selection is unavailable;
+it never retries or selects another episode. Two synthetic regression cases reproduced
+the generic-error fallthrough before these changes. All eleven receipt checks passed
+afterwards, including hostile service speech, invalid title/year data and conflicting
+or missing playback flags. This follow-up is source-tested and is not deployed in the
+installed build 57.
+
 Confirmation fields use localized labels and readable language/action values, while
 retaining every supplied field and the exact typed request used for authorization.
 Unknown values remain literal; exact JSON stays under action details. Cancel remains
@@ -183,6 +192,53 @@ Physical microphone capture, echo cancellation across mute/unmute and real speak
 continuity remain unverified for this change. No new recordings or physical device
 commands were used in these checks. Device configuration, recordings and analysis
 artifacts are excluded from the public change.
+
+## General-purpose working context
+
+28 November 2026: bounded original participant quotations now carry relevant earlier
+constraints, corrections and task context beyond the last sixteen messages. Retention
+cues select source evidence; they do not create a semantic profile or new instructions.
+The same context goes to routing, task workers and speculative preparation. No additional
+model call is needed to retain it. Current-session evidence and dated prior-session quotes
+are separate; recent explicit corrections govern the current task. Earlier quoted tasks
+cannot grant permissions or become an automatic action queue.
+
+An input-order candidate keeps the static topic/tool prefix and places historical
+evidence before recent action observations, with current dialogue last. Unknown fields
+remain present. Two structural checks reproduce the old trailing-history order and pass
+after the change; decoded JSON values and payload byte count are unchanged. Independent
+source inspection confirms that HTTP/Responses and router/official-CLI paths carry the
+encoded JSON as a string, preserving this inner order. Mac Catalyst compilation passed.
+This establishes the input mechanism, not improved answers or the cause of any particular
+recording. No model call was made for this candidate; semantic/live acceptance remains
+open in issue #6, and this follow-up is not deployed to installed build 57.
+
+When conversation notes are enabled, exact selected statements are stored in a bounded
+0600 sidecar in the selected topic's conversation folder. An optional model-summary rewrite
+does not replace that evidence. Clearing topic notes removes both. Sidecar reads reject
+symlinks, excessive sizes and invalid shapes. With notes disabled, earlier summaries and
+statement sidecars are excluded; within-session working context still works.
+
+Seven focused Foundation checks passed for cross-domain continuity, source-role isolation,
+corrections, bounded complete quotations, dated provenance and local persistence/clearing.
+The combined build 56 (voice controls, working context and orb rest-pose fix) passed 39
+focused native checks, including two session-level continuity/memory-opt-out regressions,
+five orb checks and two decoder-failure feedback cases. Signed iPhone and Mac Catalyst
+builds succeeded. Synthetic task continuity used the existing main calls without adding
+retention calls; it made no external tool changes.
+
+`WorkingContextModelProbe` completed four typed synthetic model calls comparing recent
+history alone with retained quotations. The recent-history writing case lacked the earlier
+recipient/task details; the retained version supplied the requested two-sentence message.
+The retained choice response kept an earlier rejected option excluded. This is a small,
+ordered paired probe through the existing adapter with silent output and no tools. Call
+order, caching and provider conditions were not controlled; its task-specific rubric and
+first-text measurements are not a general intelligence or voice-speed benchmark.
+
+A typed `playback_failed` result with verified audio identifies the found language and
+explains the failed player start. Player cleanup to idle does not turn that failure into
+missing-language availability. Unverified language metadata never creates a language
+claim or an automatic fallback; raw service speech and diagnostic codes stay unspoken.
 
 ### Recognition recovery after unmuting (build 57)
 

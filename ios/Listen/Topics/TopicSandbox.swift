@@ -21,6 +21,8 @@ struct TopicSandbox {
         var summary: String?
         /// The recording's stable ID, also for an asynchronous rewrite of this same note.
         var runID: String? = nil
+        /// Exact participant statements, independent of an optional model summary.
+        var contextStatements: [String] = []
     }
 
     let folder: URL
@@ -47,7 +49,7 @@ struct TopicSandbox {
     /// and no file is written.
     @discardableResult
     func write(_ conversation: Conversation) -> URL? {
-        guard !conversation.cards.isEmpty || conversation.summary != nil else { return nil }
+        guard !conversation.cards.isEmpty || conversation.summary != nil || !conversation.contextStatements.isEmpty else { return nil }
         let name = DateFormatter()
         name.locale = Locale(identifier: "en_US_POSIX")
         name.dateFormat = "yyyy-MM-dd_HH-mm-ss"
@@ -57,6 +59,15 @@ struct TopicSandbox {
         do {
             try FileManager.default.createDirectory(at: conversations, withIntermediateDirectories: true)
             try Self.markdown(conversation).write(to: file, atomically: true, encoding: .utf8)
+            if !conversation.contextStatements.isEmpty {
+                let statements = conversation.contextStatements
+                guard statements.count <= 24, statements.allSatisfy({ !$0.isEmpty && $0.count <= 600 }) else { return nil }
+                let data = try JSONEncoder().encode(statements)
+                guard data.count <= 20_000 else { return nil }
+                let contextFile = file.deletingPathExtension().appendingPathExtension("context.json")
+                try data.write(to: contextFile, options: .atomic)
+                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: contextFile.path)
+            }
             // Beside the note: the blocks with their earlier versions, so an opened topic shows its stacks again.
             if !conversation.blocks.isEmpty, let data = try? JSONEncoder().encode(conversation.blocks) {
                 try? data.write(to: file.deletingPathExtension().appendingPathExtension("json"), options: .atomic)
@@ -145,6 +156,24 @@ struct TopicSandbox {
             left -= piece.count
         }
         return parts.joined(separator: "\n")
+    }
+
+    /// Only this topic's bounded, app-written sidecars; never model-summary claims.
+    /// Clearing notes also deletes these sidecars. Call only when note memory is enabled.
+    func contextStatements(notes limit: Int = 3) -> [AssistantWorkingContext.Archived] {
+        var result: [AssistantWorkingContext.Archived] = []
+        for note in notes.suffix(max(0, min(3, limit))) {
+            let id = note.deletingPathExtension().lastPathComponent
+            guard id.wholeMatch(of: /\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}/) != nil else { continue }
+            let file = note.deletingPathExtension().appendingPathExtension("context.json")
+            guard let metadata = try? file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]),
+                  metadata.isRegularFile == true, metadata.isSymbolicLink != true, (metadata.fileSize ?? 20_001) <= 20_000,
+                  let data = try? Data(contentsOf: file), data.count <= 20_000,
+                  let statements = try? JSONDecoder().decode([String].self, from: data), statements.count <= 24,
+                  statements.allSatisfy({ !$0.isEmpty && $0.count <= 600 }) else { continue }
+            result += statements.map { .init(conversation: id, quote: $0) }
+        }
+        return result
     }
 
     /// Forgets what earlier conversations left; files the user put there stay.
