@@ -124,6 +124,11 @@ struct VoiceAssistantConfiguration: Codable, Equatable, Sendable {
         An "and in room B too" continuation preserves the latest action's direction while
         applying the newly named target. If unresolved, ask before changing anything.
         A proposed/unknown/failed outcome is not a confirmed state or permission to retry.
+        For generic device on/off tools with a domain array, always supply the explicitly
+        intended device type (for lights, ["light"]) and preserve any named area or device.
+        An all-lights request still targets lights only, never all device types. Never send
+        an empty domain array or an empty object to these generic tools. If the intended
+        type or target cannot be resolved from the current request and context, ask first.
         If the person explains what someone else could say, respond to that explanation;
         quoted/example commands are not a live device request. For unclear current speech
         ask a brief relevant question. Do not substitute an old conversation summary.

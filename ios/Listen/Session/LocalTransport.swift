@@ -23,6 +23,57 @@ final class LocalTransport: Transport {
         commonFormat: .pcmFormatInt16, sampleRate: WireProtocol.sampleRate, channels: 1, interleaved: true)!
     private var seq: UInt64 = 0
     private var listening = false
+    private var inputMuted = false
+    private var inputEpoch = 0
+    private var mutedAt: Double?
+    private var captureGaps: [(after: Double, duration: Double)] = []
+    private var acousticSupport: [UInt64: Bool] = [:]
+
+    /// The recognizer's feed clock pauses with input; recorded replay time includes
+    /// generated mute silence. Map timestamps without sending that silence to ASR.
+    nonisolated static func recordingTime(_ seconds: Double, gaps: [(after: Double, duration: Double)]) -> Double {
+        seconds + gaps.filter { seconds >= $0.after }.reduce(0) { $0 + $1.duration }
+    }
+    private var discardThrough = 0.0
+    private var inputCancellation: Task<Void, Never>?
+    /// The analyzer's converted feed clock, not the microphone's input sample count.
+    private var analyzerInputEnd = CMTime.zero
+
+    func setInputMuted(_ muted: Bool) {
+        inputMuted = muted
+        let now = ProcessInfo.processInfo.systemUptime
+        if !muted {
+            if let start = mutedAt {
+                captureGaps.append((Double(hearingSamples) / WireProtocol.sampleRate, max(0, now - start)))
+                mutedAt = nil
+            }
+            RunRecorder.assistantOutput?.log("voice_recognition", ["state": "input_resumed", "epoch": inputEpoch])
+            return
+        }
+        if mutedAt == nil { mutedAt = now }
+        inputEpoch += 1
+        let cutoff = analyzerInputEnd
+        discardThrough = cutoff.seconds
+        committedSentences = 0
+        sentenceSeen = .init()
+        segment += 1
+        revision = 0
+        lastSentenceEnd = discardThrough
+        converter = nil
+        RunRecorder.assistantOutput?.log("voice_recognition", ["state": "input_muted", "epoch": inputEpoch, "discard_before_s": discardThrough])
+        guard let analyzer else { return }
+        inputCancellation?.cancel()
+        let epoch = inputEpoch
+        // Mute discards pending input. Finalizing an end-exclusive/future sample
+        // while blocking all new input can wait forever. Cancellation never gates
+        // resumed frames; late pre-mute results are still filtered below.
+        inputCancellation = Task { [weak self] in
+            guard !Task.isCancelled else { return }
+            await analyzer.cancelAnalysis(before: cutoff)
+            guard !Task.isCancelled, let self, self.inputEpoch == epoch else { return }
+            RunRecorder.assistantOutput?.log("voice_recognition", ["state": "pending_input_discarded", "epoch": epoch])
+        }
+    }
     private var segment: UInt64 = 1
     private var revision = 0
     private var committedSentences = 0
@@ -50,7 +101,7 @@ final class LocalTransport: Transport {
     private var inputActivity = SpeechActivityWindow()
 
     func hasSpeech(_ segment: TranscriptSegment) -> Bool {
-        inputActivity.supports(startMs: segment.startMs, endMs: segment.endMs)
+        acousticSupport[segment.segmentID] ?? inputActivity.supports(startMs: segment.startMs, endMs: segment.endMs)
     }
     private var fedSamples: Int { refiner == nil ? hearingSamples : historyStart + history.count }
     private var lastSentenceEnd = 0.0
@@ -154,9 +205,12 @@ final class LocalTransport: Transport {
     }
 
     func sendAudio(_ frame: AudioFrame) {
-        guard listening, let input, let buffer = buffer(from: frame.pcm) else { return }
+        guard listening, !inputMuted, let input, let buffer = buffer(from: frame.pcm) else { return }
         inputActivity.receive(frame.pcm)
-        input.yield(AnalyzerInput(buffer: buffer))
+        let start = analyzerInputEnd
+        let duration = CMTime(value: CMTimeValue(buffer.frameLength), timescale: CMTimeScale(buffer.format.sampleRate.rounded()))
+        analyzerInputEnd = CMTimeAdd(start, duration)
+        input.yield(AnalyzerInput(buffer: buffer, bufferStartTime: start))
         hearingSamples += frame.pcm.count / MemoryLayout<Int16>.size
         guard refiner != nil else { return }
         let frameSamples = WireProtocol.frameBytes / 2
@@ -174,10 +228,9 @@ final class LocalTransport: Transport {
 
     func endUtterance() {
         guard listening, let analyzer else { return }
-        // Through the sound heard so far: without a time it waits for the end of the input,
-        // which a live microphone never reaches, and nothing after it is recognised.
-        let heard = CMTime(value: CMTimeValue(hearingSamples), timescale: CMTimeScale(WireProtocol.sampleRate))
-        Task { try? await analyzer.finalize(through: heard) }
+        // nil finalizes only audio already consumed. An input/output conversion
+        // delay or an exclusive buffer end must never request future audio.
+        Task { try? await analyzer.finalize(through: nil) }
     }
 
     // MARK: Recognition
@@ -219,6 +272,7 @@ final class LocalTransport: Transport {
                 print("[Listen] transcribing \(locale.identifier), format \(String(describing: analyzerFormat))")
                 emit(.state(.listening, reason: nil))
                 for try await result in transcriber.results {
+                    guard !inputMuted, result.range.start.seconds >= discardThrough else { continue }
                     heard(String(result.text.characters), isFinal: result.isFinal,
                           marks: Self.timeMarks(in: result.text), audioEnd: result.range.end.seconds)
                 }
@@ -382,11 +436,12 @@ final class LocalTransport: Transport {
         sent[heard.segmentID] = heard
         if sent.count > 200, let oldest = sent.keys.min() { sent[oldest] = nil }
         let previous = refining
+        let epoch = inputEpoch
         refining = Task { [weak self] in
             await previous?.value
             let queued = Date()
             let result = await refiner.refine(request)
-            guard let self, !Task.isCancelled else { return }
+            guard let self, !Task.isCancelled, !self.inputMuted, self.inputEpoch == epoch else { return }
             var refined = self.sent[heard.segmentID] ?? heard
             if let text = result.text { refined.text = text }
             // Earlier sentences first, so the feed changes top to bottom.
@@ -554,6 +609,9 @@ final class LocalTransport: Transport {
     }
 
     private func teardown() {
+        inputCancellation?.cancel(); inputCancellation = nil
+        analyzerInputEnd = .zero
+        discardThrough = 0
         answers?.stop()
         refining?.cancel()
         refining = nil
@@ -573,6 +631,15 @@ final class LocalTransport: Transport {
     }
 
     private func emit(_ event: ServerEvent) {
+        var event = event
+        if case .transcript(var segment) = event {
+            guard !inputMuted else { return }
+            acousticSupport[segment.segmentID] = inputActivity.supports(startMs: segment.startMs, endMs: segment.endMs)
+            if acousticSupport.count > 256, let oldest = acousticSupport.keys.min() { acousticSupport[oldest] = nil }
+            segment.startMs = UInt64(Self.recordingTime(Double(segment.startMs) / 1000, gaps: captureGaps) * 1000)
+            segment.endMs = UInt64(Self.recordingTime(Double(segment.endMs) / 1000, gaps: captureGaps) * 1000)
+            event = .transcript(segment)
+        }
         seq += 1
         onEvent?(.envelope(Envelope(v: WireProtocol.version, seq: seq, event: event)))
     }

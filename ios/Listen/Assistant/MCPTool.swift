@@ -8,7 +8,11 @@ struct MCPTool: Codable, Equatable, Sendable {
     static func read(_ value: HarnessValue) throws -> Self {
         guard let object = value.object, let name = object["name"]?.string,
               !name.isEmpty, name.utf8.count <= 128, let schema = object["inputSchema"]?.object else { throw MCPFailure.invalidResponse }
-        return Self(name: name, description: String((object["description"]?.string ?? "").prefix(1000)), inputSchema: schema)
+        var tool = Self(name: name, description: String((object["description"]?.string ?? "").prefix(1000)), inputSchema: schema)
+        if tool.needsExplicitDomain, tool.fields != nil {
+            tool.inputSchema["required"] = .array(tool.required.sorted().map(HarnessValue.string))
+        }
+        return tool
     }
 
     /// A deliberately bounded schema subset; unsupported tools remain visible but unavailable.
@@ -58,12 +62,25 @@ struct MCPTool: Codable, Equatable, Sendable {
         }
     }
 
+    /// Home Assistant's generic on/off tools otherwise accept an empty object,
+    /// which can fail or imply every device. Require an explicit device domain;
+    /// never infer a global scope or manufacture a default target in the executor.
+    private var needsExplicitDomain: Bool {
+        ["HassTurnOn", "HassTurnOff"].contains(name)
+            && inputSchema["properties"]?.object?["domain"]?.object?["type"] == .string("array")
+    }
+
     var required: Set<String> {
-        guard case .array(let values) = inputSchema["required"] else { return [] }
-        return Set(values.compactMap(\.string))
+        let declared: Set<String>
+        if case .array(let values) = inputSchema["required"] { declared = Set(values.compactMap(\.string)) }
+        else { declared = [] }
+        return needsExplicitDomain ? declared.union(["domain"]) : declared
     }
 
     func accepts(_ arguments: [String: ConversationValue]) -> Bool {
+        if needsExplicitDomain {
+            guard case .array(let domains) = arguments["domain"], !domains.isEmpty else { return false }
+        }
         guard let fields, required.isSubset(of: Set(arguments.keys)), Set(arguments.keys).isSubset(of: Set(fields.keys)) else { return false }
         for (name, value) in arguments {
             guard fields[name]?.accepts(value) == true, let schema = inputSchema["properties"]?.object?[name]?.object else { return false }
@@ -119,6 +136,7 @@ enum AssistantToolFeedback {
         }
         switch result {
         case .succeeded(let detail):
+            if let receipt = playbackReceipt(detail, arguments: arguments, language: language) { return receipt }
             if ["HassTurnOn", "HassTurnOff"].contains(tool ?? ""),
                arguments["domain"] == .array([.string("light")]),
                let data = detail.data(using: .utf8), (try? HarnessJSON.checkUniqueKeys(data)) != nil,
@@ -177,6 +195,7 @@ enum AssistantToolFeedback {
             }
             return text("The service has responded. Details are available in the app.", "Die Rückmeldung ist da. Die Details findest du in der App.")
         case .failed(let detail):
+            if let clarification = titleClarification(detail, language: language) { return clarification }
             // Classify a short service error, never narrate its payload or instructions.
             if needsClarification(detail) {
                 return text("The service could not identify the selection uniquely. Can you be more specific?",
@@ -193,6 +212,157 @@ enum AssistantToolFeedback {
             return text("The action was not sent.", "Die Aktion wurde nicht gesendet.")
         default: return nil
         }
+    }
+
+    /// Only a coherent, confirmed player receipt may assert playback. Service speech is
+    /// untrusted data and is never read verbatim, including when the RPC succeeded.
+    private static func playbackReceipt(_ raw: String, arguments: [String: ConversationValue], language: Language) -> String? {
+        guard let object = structured(raw), let player = object["player"]?.object,
+              ["done", "playing"].contains(object["outcome"]?.string ?? ""),
+              player["error"] == nil || player["error"] == .string("") else { return nil }
+        if playbackIdentityConflicts(object, player: player, arguments: arguments) {
+            return language == .de
+                ? "Die Rückmeldung passt nicht zum angefragten Inhalt. Ich kann die Wiedergabe noch nicht bestätigen."
+                : "The receipt does not match the requested content. I cannot confirm playback yet."
+        }
+        let state = player["state"]?.string
+        if object["outcome"] == .string("done") {
+            if case .string(let action) = arguments["action"] {
+                if action == "pause", state == "paused" { return language == .de ? "Die Wiedergabe ist pausiert." : "Playback is paused." }
+                if action == "resume", state == "playing" { return language == .de ? "Die Wiedergabe läuft weiter." : "Playback has resumed." }
+                if action == "stop", state == "idle" || state == "stopped" { return language == .de ? "Die Wiedergabe ist gestoppt." : "Playback is stopped." }
+            } else if arguments["action"] == nil {
+                // Continue/status operations can confirm the current state without an
+                // action argument. Do not infer that a new playback was started.
+                if state == "playing" { return language == .de ? "Die Wiedergabe läuft." : "Playback is running." }
+                if state == "paused" { return language == .de ? "Die Wiedergabe ist pausiert." : "Playback is paused." }
+            }
+            return nil
+        }
+        guard object["outcome"] == .string("playing"),
+              object["playback_started"] == nil || object["playback_started"] == .bool(true), state == "playing" else { return nil }
+        let code = player["audio_language"]?.string
+        let audio = code.flatMap { languageName($0, language: language) }
+        // A reported fallback must identify its actual language; never imply the requested one.
+        if object["fallback_used"] == .bool(true), audio == nil { return nil }
+        var subject = language == .de ? "Die Wiedergabe läuft" : "Playback is running"
+        if let selection = object["selection"]?.object, let title = mediaLabel(selection["series"]?.string),
+           case .integer(let season) = selection["season"], (1...999).contains(season),
+           case .integer(let episode) = selection["episode"], (1...9999).contains(episode) {
+            subject = language == .de ? "„\(title)“, Staffel \(season), Folge \(episode) läuft" : "\"\(title)\", season \(season), episode \(episode) is playing"
+        }
+        if let audio {
+            subject += language == .de ? " auf \(audio)" : " in \(audio)"
+        }
+        subject += "."
+        if object["fallback_used"] == .bool(true) {
+            subject += language == .de ? " Als Ersatzsprache." : " Using the fallback language."
+        }
+        return subject
+    }
+
+    /// Compare supplied identities only. Missing legacy metadata is not an invented
+    /// conflict, and matching media IDs permit display aliases, never another episode.
+    private static func playbackIdentityConflicts(_ object: [String: HarnessValue], player: [String: HarnessValue],
+                                                  arguments: [String: ConversationValue]) -> Bool {
+        let selection = object["selection"]?.object ?? [:]
+        func integer(_ value: HarnessValue?) -> Int64? {
+            guard case .integer(let value) = value else { return nil }
+            return value
+        }
+        func identifier(_ value: HarnessValue?) -> String? {
+            guard let value = value?.string, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  value.utf8.count <= 256,
+                  !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else { return nil }
+            return value
+        }
+        // A start that opts into playback correlation must supply a matching echo.
+        // A status/control can describe an existing player's ID without reserving a
+        // new start of its own. Legacy receipts keep their available identity checks.
+        if object["playback_id"] != nil || (object["playback_started"] == .bool(true) && player["playback_id"] != nil) {
+            guard let expected = identifier(object["playback_id"]),
+                  let actual = identifier(player["playback_id"]), expected == actual else { return true }
+        }
+        let parsed = player["title"]?.string.flatMap(episodeTitle)
+        for key in ["season", "episode", "year"] {
+            var values = [integer(selection[key]), integer(player[key])].compactMap { $0 }
+            if case .integer(let requested) = arguments[key] { values.append(Int64(requested)) }
+            if key == "season", let parsed { values.append(parsed.season) }
+            if key == "episode", let parsed { values.append(parsed.episode) }
+            if Set(values).count > 1 { return true }
+        }
+
+        var sameMedia = false
+        for key in ["imdb_id", "media_id"] {
+            if let selected = identifier(selection[key]), let actual = identifier(player[key]) {
+                if selected != actual { return true }
+                sameMedia = true
+            }
+        }
+        if sameMedia { return false }
+        guard let selected = selection["series"]?.string, !selected.isEmpty else { return false }
+        func normalized(_ value: String) -> String {
+            value.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+                .unicodeScalars.filter(CharacterSet.alphanumerics.contains).map(String.init).joined()
+        }
+        // A free-form display title may name an episode rather than its series.
+        // Only explicit series metadata or our recognized suffix provides a comparison.
+        let names = [parsed?.title, player["series"]?.string].compactMap { $0 }.filter { !$0.isEmpty }
+        return names.contains { normalized(selected) != normalized($0) }
+    }
+
+    /// Only the explicit, trailing SxxExx display marker is interpreted as an
+    /// episode identity. Other title formats remain opaque data.
+    private static func episodeTitle(_ title: String) -> (title: String, season: Int64, episode: Int64)? {
+        guard title.utf8.count <= 512,
+              let regex = try? NSRegularExpression(pattern: #"(?i)\s+[–—-]?\s*S([0-9]{1,3})\s*E([0-9]{1,4})\s*$"#),
+              let match = regex.firstMatch(in: title, range: NSRange(title.startIndex..., in: title)),
+              let range = Range(match.range, in: title),
+              let seasonRange = Range(match.range(at: 1), in: title), let season = Int64(title[seasonRange]),
+              let episodeRange = Range(match.range(at: 2), in: title), let episode = Int64(title[episodeRange]) else { return nil }
+        return (String(title[..<range.lowerBound]).trimmingCharacters(in: .whitespaces), season, episode)
+    }
+
+    private static func titleClarification(_ raw: String, language: Language) -> String? {
+        guard let object = structured(raw), object["outcome"] == .string("ambiguous_title"),
+              object["playback_started"] != .bool(true), case .array(let choices) = object["choices"],
+              (2...20).contains(choices.count) else { return nil }
+        let labels = choices.prefix(3).compactMap { value -> String? in
+            guard let choice = value.object, let name = mediaLabel(choice["name"]?.string),
+                  let year = releaseStartYear(choice["releaseInfo"]?.string) else { return nil }
+            return "\(name) (\(year))"
+        }
+        guard labels.count == min(3, choices.count), Set(labels).count == labels.count else { return nil }
+        let options = labels.joined(separator: language == .de ? " oder " : " or ")
+        return language == .de ? "Ich habe mehrere passende Serien gefunden: \(options). Welche meinst du?" : "I found several matching series: \(options). Which one do you mean?"
+    }
+
+    private static func releaseStartYear(_ raw: String?) -> Int? {
+        guard let raw, raw.count <= 12 else { return nil }
+        let parts = raw.components(separatedBy: CharacterSet(charactersIn: "-–")).map { $0.trimmingCharacters(in: .whitespaces) }
+        func year(_ text: String) -> Int? {
+            guard text.count == 4, text.utf8.allSatisfy({ (48...57).contains($0) }),
+                  let number = Int(text), (1888...2200).contains(number) else { return nil }
+            return number
+        }
+        guard (1...2).contains(parts.count), let start = year(parts[0]) else { return nil }
+        if parts.count == 2, !parts[1].isEmpty {
+            guard let end = year(parts[1]), end >= start else { return nil }
+        }
+        return start
+    }
+
+    private static func structured(_ raw: String) -> [String: HarnessValue]? {
+        guard raw.utf8.count <= 8192 else { return nil }
+        let data = Data(raw.utf8)
+        guard (try? HarnessJSON.checkUniqueKeys(data)) != nil else { return nil }
+        return (try? JSONDecoder().decode(HarnessValue.self, from: data))?.object
+    }
+
+    private static func mediaLabel(_ value: String?) -> String? {
+        guard let value, !value.isEmpty, value.count <= 120,
+              value.allSatisfy({ $0.isLetter || $0.isNumber || " -'’&:.,!?()".contains($0) }) else { return nil }
+        return value
     }
 
     /// A reported alternative is an offer, never evidence of playback or consent.

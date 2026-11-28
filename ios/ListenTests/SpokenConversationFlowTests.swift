@@ -749,6 +749,13 @@ private func form(grace: Double = 0.05) -> SpokenAnswerForm {
         model.captured(pcm(seconds: 0.1, level: 9_000))
         let withheld = try #require(transport.frames.last)
         #expect(withheld.count == pcm(seconds: 0.1, level: 0).count && withheld.allSatisfy { $0 == 0 })
+        let beforeMute = transport.frames.count, beforeStops = voice.stops
+        model.setConversationMicrophoneMuted(true)
+        model.captured(pcm(seconds: 0.1, level: 9_000))
+        #expect(model.conversationMicrophoneMuted && model.core.phase == .listening)
+        #expect(transport.frames.count == beforeMute && voice.stops == beforeStops)
+        #expect(!spoken.paused, "input mute is not a conversation pause")
+        model.setConversationMicrophoneMuted(false)
         voice.finish(0)
         await until { !spoken.blocksRecognition }
 

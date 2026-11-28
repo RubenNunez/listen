@@ -24,7 +24,8 @@ struct SpokenHarnessBar: View {
     private static let sentenceID = "spoken.words.sentence"
 
     private var state: (title: String, note: String, symbol: String) {
-        switch spoken.activity {
+        if model.conversationMicrophoneMuted && !spoken.paused { return ("Microphone muted", "Replies and tools continue.", "mic.slash.fill") }
+        return switch spoken.activity {
         case .paused: ("Paused", "Nothing is said until the conversation goes on.", "pause.fill")
         case .preparing: ("Preparing", spoken.listensWhileSpeaking ? "Listen hears you." : "Listen does not hear you meanwhile.", "speaker.wave.1")
         case .speaking: ("Speaking", spoken.listensWhileSpeaking ? "Listen hears you. Speak to interrupt." : "Listen does not hear you meanwhile.", "speaker.wave.2.fill")
@@ -76,15 +77,20 @@ struct SpokenHarnessBar: View {
     private var fixed: some View {
         Group {
             if roomy {
-                VStack(alignment: .leading, spacing: 8) { status; stop }
+                VStack(alignment: .leading, spacing: 8) { status; HStack { microphone; stop } }
             } else {
                 HStack(alignment: .top, spacing: 12) {
                     status.frame(maxWidth: .infinity, alignment: .leading)
+                    microphone
                     stop
                 }
             }
         }
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+    }
+
+    private var microphone: some View {
+        ConversationMicrophoneButton(model: model, language: model.core.language, identifier: "spoken.microphone")
     }
 
     private var status: some View {

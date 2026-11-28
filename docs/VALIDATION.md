@@ -116,3 +116,90 @@ tool mappings and owner grants, rejects an attempted mapping change, and appends
 new permissions without standing grants. Source IDs and other servers remain intact.
 Native setup is discovery only; binding a continue capability does not test or invoke
 playback. Device-specific configurations and watch state stay outside this repository.
+
+## Microphone mute and observed action feedback
+
+Implementation decision, 28 November 2026: live conversations have an explicit
+microphone-only mute control in both assistant and spoken-card views. Muting removes
+the input tap, closes frame delivery, flushes the unfinished recognition boundary and
+rejects late input callbacks. The shared output engine, committed requests and native
+tool operations remain active. This is application input muting; hardware microphone
+power state is outside this control.
+
+Recordings represent muted intervals with generated silence. Recognition timestamps
+are mapped across those intervals, while acoustic support remains tied to the original
+recognition feed. Mute events identify the generated sections for later analysis.
+
+Short acknowledgements such as “thank you” preserve a pending request; substantive
+corrections still interrupt. Observed tool feedback survives conversational interruption.
+An identical action awaiting owner confirmation reuses the existing pending card. This
+neither grants permission nor coalesces a later explicit repeat after dispatch.
+
+Playback/control speech uses coherent structured receipts and the observed player state,
+including the actual fallback language. Continue/status results do not imply a new start.
+Title ambiguity offers bounded validated title/year choices. Raw service speech and
+instructions are never narrated. Generic Home Assistant on/off tools require a nonempty,
+explicit domain when their schema offers a domain array; execution supplies no guessed
+device type or all-device default.
+
+Confirmation fields use localized labels and readable language/action values, while
+retaining every supplied field and the exact typed request used for authorization.
+Unknown values remain literal; exact JSON stays under action details. Cancel remains
+the same denial path and now explains how to reformulate a request. Three synthetic
+formatting checks and a Mac Catalyst SDK build passed. Device layout and interaction
+acceptance remain pending; no new conversation or device action was run for this check.
+
+Playback receipts reject explicit conflicts between requested, selected and observed
+season/episode/year, media IDs and trailing `SxxExx` player-title markers. Matching
+stable media IDs permit display aliases but never override an episode conflict.
+If a receipt supplies a `playback_id`, the player must echo that ID. Status/control
+receipts may describe an existing player's ID without reserving a new start; older
+adapters with neither ID remain supported. Opaque display labels are not assumed to
+be series names. Conflicts produce an unconfirmed response, without
+retrying or dispatching anything. Five synthetic identity regressions and the existing
+receipt checks pass against the actual Foundation decoder, including the independent
+stale-player reproducer. No microphone, model, network or physical player is involved.
+
+If an observation changes during generation, a buffered answer is regenerated from the
+new facts at most once before speaking or proposing operations. Direct answers that
+start while a native operation is pending are buffered through model completion for this
+check. That can delay the first spoken sentence for these overlapping requests and can
+add one model request. Ordinary replies retain streaming. This change establishes no
+new acoustic latency score or comparison with another voice service.
+
+Validation: 19 focused native tests passed with `LISTEN_TEST_NO_MICROPHONE=1` and
+`LISTEN_TALKBACK_MUTE=1`: seven `PlaybackReceiptTests`, eight selected
+`VoiceAssistantSessions` regressions, three `TerminalInterface` capture/clock checks,
+and `SpokenSessionWiring/talkStartsTheTopicsOwnSystemAndItsPauseReachesTheRecogniser()`.
+The latter exercises SessionModel ingestion and output continuity with synthetic audio
+and silent speech. Both buffered-tool and tool-withheld reply paths are covered by the
+new observation-refresh regression. Thirteen focused Foundation/MCP checks also passed.
+Mac Catalyst test builds and an unsigned iOS application build succeeded. Reproduce the
+native checks with the generated `.xctestrun`, the two environment variables above, and
+`-only-testing:ListenTests/<suite>/<method>()` filters; confirm the Swift Testing test count,
+not just the XCTest wrapper summary. A zero-test run is not validation.
+
+Physical microphone capture, echo cancellation across mute/unmute and real speaker
+continuity remain unverified for this change. No new recordings or physical device
+commands were used in these checks. Device configuration, recordings and analysis
+artifacts are excluded from the public change.
+
+### Recognition recovery after unmuting (build 57)
+
+The original mute implementation could wait for an analyzer timestamp while blocking
+the very frames needed to reach it. Build 57 removes that input barrier. Cancellation
+discards unfinished pre-mute analysis without gating resumed frames; a converted-buffer
+clock and late-result filtering preserve the recognition boundary. Explicit utterance
+finalization uses already-consumed audio, rather than a possibly future input timestamp.
+See Apple's [finalization contract](https://developer.apple.com/documentation/speech/speechanalyzer/finalize%28through%3A%29)
+and [cancellation contract](https://developer.apple.com/documentation/speech/speechanalyzer/cancelanalysis%28before%3A%29),
+verified 28 November 2026.
+
+The explicit opt-in `LiveRecognitionMuteProbe` feeds an owner-supplied local WAV into
+the real SpeechAnalyzer, with physical input disabled and no assistant, model, tools or
+audio player. It observed recognition before mute, after unmute and after five rapid
+toggles, with increasing segment IDs and no old results delivered without new input.
+The probe passed in 4.410 seconds; this is test duration, not conversational latency.
+The same 39 combined native regressions also passed on build 57. Signed iOS and Mac
+Catalyst test builds succeeded. The fixture and receipts remain outside version control.
+This does not establish physical microphone, echo-cancellation or speaker quality.

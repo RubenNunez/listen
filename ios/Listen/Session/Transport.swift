@@ -18,8 +18,10 @@ protocol Transport: AnyObject {
     /// The speaker has paused: finish recognising what was said so far now, rather than
     /// after the recogniser's own long pause.
     func endUtterance()
+    func setInputMuted(_ muted: Bool)
 }
 
 extension Transport {
     func endUtterance() {}
+    func setInputMuted(_ muted: Bool) {}
 }
