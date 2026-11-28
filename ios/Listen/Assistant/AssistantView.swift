@@ -19,7 +19,7 @@ struct AssistantView: View {
     private var waiting: Bool {
         !ended && !assistant.paused && assistant.configuration.speakReplies && !assistant.hearing
             && !assistant.audible
-            && (assistant.thinking || (assistant.speaking && !assistant.audible))
+            && (assistant.thinking || assistant.waitingForTools || (assistant.speaking && !assistant.audible))
             // "Ich schaue das nach." is heard instead of the sound, not over it.
             && !(assistant.acknowledging && assistant.audible)
     }
@@ -41,6 +41,7 @@ struct AssistantView: View {
             return assistant.listensWhileSpeaking ? "Listening · speak to interrupt" : assistant.audible ? "Speaking · tap the orb to interrupt" : "Preparing the voice"
         }
         if assistant.settling && !assistant.listensWhileSpeaking { return "Listening in a moment" }
+        if assistant.waitingForTools { return "Using your tools · speak to interrupt" }
         if assistant.thinking { return "Thinking" }
         return "Listening"
     }

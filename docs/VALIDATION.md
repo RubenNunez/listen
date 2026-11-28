@@ -43,3 +43,29 @@ HTTP MCP endpoints can use private IPv4/IPv6 addresses, loopback, unqualified lo
 The live conversation settings show configured answer-model roles and native tool availability. These are configuration facts, not a claim that every model is called on every turn. `NativeVoiceRoutingSetup` is a separately opted-in owner setup check: it sends only tiny synthetic connection requests through the existing adapters, verifies a typed routing response, and enables only the model slots it checked. Single connection timings are not comparative model benchmarks or a voice-quality score.
 
 Decision, 28 November 2026: local-network MCP access belongs in the generic Listen client. Home-automation server implementations, deployment settings, device lists and client credentials remain separate from this public source tree.
+
+## Long-running tools and spoken clarification
+
+Checked on 28 November 2026. MCP discovery keeps a 25-second request timeout and
+30-second total resource deadline. Tool execution uses separate 180-second request
+and resource deadlines. These bounds accommodate tools that legitimately outlive
+discovery; they do not accelerate the server. A dispatched action is never
+retried automatically when its result is unknown. The live view includes pending
+tool execution in its waiting indicator and optional waiting sound.
+
+Three targeted Foundation-only macOS checks passed using the exact client, tool
+feedback and conversation sources, with the corresponding app test methods copied
+unchanged into a temporary headless harness. They verify separate discovery/call
+request timeouts and one dispatch, bounded ambiguity clarification, and preservation
+of raw-payload/partial-failure safeguards. The synthetic exchange makes no network
+request or device action. This does not measure a real HTTP deadline, voice latency
+or subjective speech quality.
+
+A short plain-language ambiguity error receives a native clarification instead of
+only a generic error. Arbitrary JSON, multiline payloads and unsupported errors
+retain the safe fallback and their separate diagnostic detail. No raw service text
+is added to speech. The model instructions encourage context- and lookup-supported
+name/title guesses while preserving explicit language constraints and device-action
+scope. Normal speech describes user outcomes; internal providers and tool identifiers
+are reserved for explicit diagnostics or a necessary owner decision. Prompt guidance
+is not evidence that a live request resolved correctly.

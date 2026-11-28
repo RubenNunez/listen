@@ -35,19 +35,25 @@ private final class MCPRedirectPolicy: NSObject, URLSessionTaskDelegate {
 }
 
 struct MCPHTTPTransport: Sendable {
-    private let session: URLSession
+    private let discovery: URLSession
+    private let execution: URLSession
     init() {
+        func make(requestTimeout: TimeInterval, resourceTimeout: TimeInterval) -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpShouldSetCookies = false
         configuration.httpCookieStorage = nil
         configuration.urlCredentialStorage = nil
         configuration.urlCache = nil
-        configuration.timeoutIntervalForRequest = 25
-        configuration.timeoutIntervalForResource = 30
-        session = URLSession(configuration: configuration, delegate: MCPRedirectPolicy(), delegateQueue: nil)
+        configuration.timeoutIntervalForRequest = requestTimeout
+        configuration.timeoutIntervalForResource = resourceTimeout
+        return URLSession(configuration: configuration, delegate: MCPRedirectPolicy(), delegateQueue: nil)
+        }
+        discovery = make(requestTimeout: 25, resourceTimeout: 30)
+        execution = make(requestTimeout: 180, resourceTimeout: 180)
     }
 
     func send(_ request: URLRequest, responseID: String?) async throws -> MCPHTTPResponse {
+        let session = request.value(forHTTPHeaderField: "Mcp-Method") == "tools/call" ? execution : discovery
         let (bytes, response) = try await session.bytes(for: request)
         guard let response = response as? HTTPURLResponse else { throw MCPFailure.invalidResponse }
         let headers = response.allHeaderFields.reduce(into: [String: String]()) {
@@ -146,7 +152,7 @@ actor MCPClient {
         }
         var body: [String: HarnessValue] = ["jsonrpc": .string("2.0"), "method": .string(method), "params": .object(params)]
         if let id { body["id"] = .string(id) }
-        var request = URLRequest(url: endpoint)
+        var request = URLRequest(url: endpoint, timeoutInterval: method == "tools/call" ? 180 : 25)
         request.httpMethod = "POST"
         request.httpBody = try JSONEncoder().encode(body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")

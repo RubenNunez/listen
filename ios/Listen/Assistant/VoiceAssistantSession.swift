@@ -33,6 +33,8 @@ final class VoiceAssistantSession {
     private(set) var localSequences: [LocalSequence] = []
     private(set) var tools: [AssistantTool] = []
     private(set) var missing: [String] = []
+    /// Native execution may outlive the model's short proposal stream.
+    var waitingForTools: Bool { state.operations.contains { $0.state == .dispatched } }
     private(set) var ready = false
     private(set) var speaking = false
     private(set) var paused = false

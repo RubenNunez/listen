@@ -49,7 +49,11 @@ import Testing
         try #require(systems.lastError == nil)
         let resolved = await MCPStore().resolve(input.server.permissions.map(\.id))
         try #require(resolved.missing.isEmpty)
-        let status: [String: Any] = ["state": "ready", "actions_sent": 0,
+        let plan = SessionModel.plan(for: topic, listenSystem: system)
+        let answer = voice.model.isEmpty ? plan.settings.merger : voice.model
+        let prefix = String(answer.split(separator: "/").first ?? "")
+        let connected = prefix == "local" ? plan.hasLocal : (plan.direct[prefix] != nil || plan.key != nil)
+        let status: [String: Any] = ["state": "ready", "actions_sent": 0, "answer_model": answer, "answer_connection_available": connected,
             "capabilities": resolved.tools.map { $0.capability.rawValue }.sorted(),
             "requires_confirmation": resolved.tools.allSatisfy { !$0.standing },
             "jev_key_present": Keychain.get(Connector.jev.rawValue) != nil,

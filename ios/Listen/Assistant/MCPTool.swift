@@ -171,7 +171,12 @@ enum AssistantToolFeedback {
                 return ["\(noun) switched \(state).", "Done, \(single ? "the light is" : "the lights are") \(state).", "\(noun) now \(state)."][index]
             }
             return text("The service has responded. Details are available in the app.", "Die Rückmeldung ist da. Die Details findest du in der App.")
-        case .failed:
+        case .failed(let detail):
+            // Classify a short service error, never narrate its payload or instructions.
+            if needsClarification(detail) {
+                return text("The service could not identify the selection uniquely. Can you be more specific?",
+                            "Der Dienst konnte die Auswahl nicht eindeutig zuordnen. Kannst du sie genauer benennen?")
+            }
             return text("The service reported an error. Check the details.", "Der Dienst meldet einen Fehler. Schau bitte in die Details.")
         case .outcomeUnknown:
             return text("The result is unknown. I will not repeat the action.", "Das Ergebnis ist unbekannt. Ich wiederhole die Aktion nicht.")
@@ -179,6 +184,15 @@ enum AssistantToolFeedback {
             return text("The action was not sent.", "Die Aktion wurde nicht gesendet.")
         default: return nil
         }
+    }
+
+    private static func needsClarification(_ raw: String) -> Bool {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, value.count <= 500,
+              !value.contains(where: { "{}[]`\n\r".contains($0) }), !value.contains("://"),
+              !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else { return false }
+        let lower = value.lowercased()
+        return ["nicht eindeutig", "not uniquely", "ambiguous", "not unique"].contains(where: lower.contains)
     }
 
     /// A returned label is data, never speech instructions or raw service output.
