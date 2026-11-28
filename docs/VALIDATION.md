@@ -116,3 +116,18 @@ tool mappings and owner grants, rejects an attempted mapping change, and appends
 new permissions without standing grants. Source IDs and other servers remain intact.
 Native setup is discovery only; binding a continue capability does not test or invoke
 playback. Device-specific configurations and watch state stay outside this repository.
+
+## Resting orb motion
+
+The orb's motion reference follows the device's resting gravity instead of a
+fixed held-phone angle. A stationary flat or held device supplies zero pull;
+changes of pose and shaking still pull the orb. The reference and sample time
+reset when the last visible owner releases the motion sensor. The 2.5-second
+value is a filter time constant, not an exact time to settle completely.
+
+Five synthetic checks of the exact `OrbTilt` source passed: flat and held rest,
+laying the device down and settling, sideways tilt, and bounded shake response.
+The exact motion adapter was typechecked against the iOS 26 simulator SDK, and
+the Mac Catalyst app/test targets built successfully. These checks open no
+microphone, play no audio and do not establish how real hand motion feels on a
+phone; that remains a hardware validation item.

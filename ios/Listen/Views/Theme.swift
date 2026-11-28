@@ -300,6 +300,8 @@ final class OrbMotion {
     private(set) var tilt = CGSize.zero
     private let manager = CMMotionManager()
     private var owners = Set<UUID>()
+    private var reading = OrbTilt()
+    private var lastSample: TimeInterval?
 
     /// A transition may briefly show two orbs. One disappearing must not stop
     /// another visible orb; the last owner releases the sensor altogether.
@@ -308,6 +310,8 @@ final class OrbMotion {
         if owners.isEmpty {
             manager.stopDeviceMotionUpdates()
             tilt = .zero
+            reading = OrbTilt()
+            lastSample = nil
         } else { start() }
     }
 
@@ -316,11 +320,14 @@ final class OrbMotion {
         manager.deviceMotionUpdateInterval = 1.0 / 30
         manager.startDeviceMotionUpdates(to: .main) { [weak self] motion, _ in
             guard let motion else { return }
-            // Gravity says how it is tilted; the user's own acceleration adds the shake.
-            let x = motion.gravity.x * 0.9 + motion.userAcceleration.x * 1.6
-            let y = -(motion.gravity.y + 0.6) * 0.9 - motion.userAcceleration.y * 1.6
+            let gravity = SIMD2(motion.gravity.x, motion.gravity.y)
+            let shake = SIMD2(motion.userAcceleration.x, motion.userAcceleration.y)
+            let stamp = motion.timestamp
             MainActor.assumeIsolated {
-                self?.tilt = CGSize(width: max(-1.2, min(1.2, x)), height: max(-1.2, min(1.2, y)))
+                guard let self else { return }
+                let elapsed = self.lastSample.map { min(max(stamp - $0, 0), 0.5) } ?? 0
+                self.lastSample = stamp
+                self.tilt = self.reading.step(gravity: gravity, shake: shake, elapsed: elapsed)
             }
         }
     }
