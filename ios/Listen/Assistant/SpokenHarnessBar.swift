@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The conversation itself, fixed above the cards of a spoken conversation: what Listen is
 /// doing right now, a way to stop it talking, the last words it heard and the sentence it is
-/// saying. The voice and what answers are in `SpokenHarnessDetails`, at the top of the cards.
+/// saying. Secondary voice and source configuration lives in conversation settings.
 ///
 /// It names whether the running input actually supports hearing during output; a test
 /// double or unavailable input must not advertise native echo cancellation.
@@ -189,47 +189,5 @@ struct SpokenHarnessBar: View {
         } else {
             text.lineLimit(lines, reservesSpace: true).minimumScaleFactor(0.85)
         }
-    }
-}
-
-/// What a spoken conversation is set to: the voice with its sample, what the voice needs on
-/// this device, and which system answers. It is the first block of the cards and scrolls with
-/// them, so its height, with large type or the disclosure open, takes nothing from the fixed
-/// header. The state and the stop are in `SpokenHarnessBar` and are not repeated here.
-struct SpokenHarnessDetails: View {
-    let model: SessionModel
-    let spoken: SpokenHarness
-    @State private var showsSource = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            #if targetEnvironment(macCatalyst)
-            AssistantVoiceMenu(current: spoken.voice, language: model.core.language, preview: spoken.preview,
-                               canSample: !spoken.paused,
-                               canPreviewPulse: !spoken.speaking && !spoken.hearing,
-                               choose: { try spoken.chooseVoice($0) }, sample: { spoken.playSample() })
-                .dynamicTypeSize(...DynamicTypeSize.accessibility2)
-            #endif
-            LocalVoiceNotice(configuration: spoken.configuration).font(.caption)
-            if !spoken.source.isEmpty {
-                DisclosureGroup("What answers", isExpanded: $showsSource) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        // Which of the person's systems is answering, in its own name.
-                        Text(spoken.source).accessibilityIdentifier("spoken.source")
-                        Text("Each answer is also a card below, with its sources.")
-                        if model.isRecording { Label("Recording on this device", systemImage: "record.circle") }
-                    }
-                    .font(.footnote).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 6)
-                }
-                .font(.footnote.weight(.semibold))
-                .accessibilityIdentifier("spoken.details")
-            }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.35), in: .rect(cornerRadius: 22))
     }
 }
