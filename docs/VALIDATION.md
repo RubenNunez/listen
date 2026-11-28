@@ -69,3 +69,10 @@ name/title guesses while preserving explicit language constraints and device-act
 scope. Normal speech describes user outcomes; internal providers and tool identifiers
 are reserved for explicit diagnostics or a necessary owner decision. Prompt guidance
 is not evidence that a live request resolved correctly.
+
+Recommendation intent is separate from playback intent: inspiration alone asks for
+brief context-based suggestions or one useful preference question. An explicit
+play-anything request delegates title selection within stated constraints, while
+identity/availability checks and native action permissions still apply. This is
+model guidance; the full recommendation-to-playback flow remains a live validation
+item and depends on the tools actually bound in that installation.

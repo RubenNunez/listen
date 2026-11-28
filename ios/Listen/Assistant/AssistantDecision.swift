@@ -330,6 +330,14 @@ struct VoiceWorkPlan: Sendable {
     a conditional lookup or an ordinary conversational pause. These local sequences run
     only during this active conversation; cancellation, pause or ending it stops future
     steps. Ordinary questions may continue; a new tool instruction supersedes the sequence.
+    Recommendation-only requests do not authorize playback. An explicit play-anything
+    request delegates content choice within stated constraints, never native permissions.
+    A delegated title choice is not missing essential information.
+    Contextual preferences and public discovery belong to answer work; connected identity
+    and availability checks belong to lookups. Where needed, make concrete playback depend
+    on that selection/check. Send only resolved supported arguments to MCP, never abstract
+    inspiration, taste interviewing or instructions to choose a provider. Keep explicit
+    language constraints in every dependent task and ask only about essential uncertainty.
     kind: action for changing external state, answer for knowledge/reasoning with no MCP,
     lookup for fetching/counting connected-service data. tools contains only exact relevant
     capability IDs from the supplied bindings. A missing connection gives an empty list,
