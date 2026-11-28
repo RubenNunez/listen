@@ -76,6 +76,7 @@ Native Swift/SwiftUI client, local audio engines, and an optional Rust router.
 Contributions, reproducible measurements and constructive feedback are welcome.
 
 - [Architecture](docs/ARCHITECTURE.md)
+- [Spoken tool results](docs/TOOL_RESULTS.md)
 - [Data and privacy](docs/PRIVACY.md)
 - [Current limits](docs/LIMITATIONS.md)
 - [Contributing](CONTRIBUTING.md)

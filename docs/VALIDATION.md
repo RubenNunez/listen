@@ -79,6 +79,8 @@ item and depends on the tools actually bound in that installation.
 
 ## Reported playback alternatives
 
+> Superseded on 28 November 2026 by [Generic spoken tool results](#generic-spoken-tool-results): Listen no longer interprets service-specific outcomes.
+
 Listen recognizes an optional application-level result envelope; this is not a
 standard MCP result field. An `alternative_available` outcome can carry
 `playback_started: false`, `requires_language_confirmation: true` and a bounded
@@ -135,7 +137,7 @@ corrections still interrupt. Observed tool feedback survives conversational inte
 An identical action awaiting owner confirmation reuses the existing pending card. This
 neither grants permission nor coalesces a later explicit repeat after dispatch.
 
-Playback/control speech uses coherent structured receipts and the observed player state,
+(Superseded by [Generic spoken tool results](#generic-spoken-tool-results).) Playback/control speech uses coherent structured receipts and the observed player state,
 including the actual fallback language. Continue/status results do not imply a new start.
 Title ambiguity offers bounded validated title/year choices. Raw service speech and
 instructions are never narrated. Generic Home Assistant on/off tools require a nonempty,
@@ -312,6 +314,8 @@ these checks.
 
 ### TV connection receipts
 
+> Superseded on 28 November 2026 by [Generic spoken tool results](#generic-spoken-tool-results): Listen no longer interprets service-specific outcomes.
+
 A validated `tv_unreachable` outcome receives a local connection-specific phrase
 in German or English, independent of the RPC success flag. Service speech stays
 untrusted. The phrase makes no claim about content availability, language or
@@ -339,3 +343,26 @@ decoding, malformed metadata, typed argument validation and existing playback
 receipts. These use the production decoder/presentation source without an app,
 microphone, model or device action. Running-window appearance and accessibility
 acceptance remain separate from these contract checks.
+
+## Generic spoken tool results
+
+Decision by the owner, 28 November 2026: Listen is a multi-purpose tool and is not
+specialised to one service. Spoken tool feedback follows the generic contract in
+[Spoken tool results](TOOL_RESULTS.md): a reserved `spoken` object with a neutral
+status and an optional server sentence. This replaces the service-specific receipts
+for playback, title choices, language offers, TV connections and Home Assistant
+lights that Listen interpreted itself. Earlier rule changed: the service's sentence
+is now spoken, but only as bounded plain text in the session language. It never
+grants a permission, confirms an action or triggers a retry.
+
+The protections of the earlier receipts are kept as generic checks:
+- a failed call never reports success;
+- an unconfirmed effect is not presented as done and is not repeated;
+- hostile or oversized text, duplicate keys and unknown statuses fall back to a
+  neutral sentence;
+- results outside the contract only get the generic sentence for the observed state.
+
+`SpokenReportTests` and the MCP client retention test cover these cases. Not changed
+in this step: the explicit domain requirement for Home Assistant's generic on/off
+tools, the confirmation card's field labels and light styling, and the media rules in
+the model instructions. They are tracked in RubenNunez/listen#15.
