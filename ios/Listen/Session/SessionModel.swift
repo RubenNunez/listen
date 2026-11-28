@@ -78,6 +78,32 @@ final class SessionModel {
     /// The user's switch on the start screen. Off means no audio session at all.
     private(set) var microphoneOn = UserDefaults.standard.bool(forKey: "microphoneOn")
     private(set) var microphoneDenied = false
+    private(set) var conversationMicrophoneMuted = false
+
+    func setConversationMicrophoneMuted(_ muted: Bool) {
+        guard conversationMicrophoneMuted != muted else { return }
+        // Close ingestion first. Queued callbacks cannot become turns or recordings.
+        if muted { conversationMicrophoneMuted = true; transport.setInputMuted(true) }
+        do {
+            try capture.setMuted(muted)
+            conversationMicrophoneMuted = muted
+            if !muted { transport.setInputMuted(false) }
+            assistant?.setMicrophoneMuted(muted)
+            spoken?.setMicrophoneMuted(muted)
+            conversationActivity.reset(); quietSeconds = 0; buffered.removeAll()
+            level = 0; waveform = [Float](repeating: 0, count: Waveform.points)
+            recorder?.setMicrophoneMuted(muted)
+        } catch {
+            // Fail closed, including a failed unmute. Answers and tools stay active.
+            conversationMicrophoneMuted = true
+            assistant?.setMicrophoneMuted(true)
+            spoken?.setMicrophoneMuted(true)
+            transport.setInputMuted(true)
+            try? capture.setMuted(true)
+            recorder?.setMicrophoneMuted(true)
+            captureError = error.localizedDescription
+        }
+    }
     /// The system the current conversation runs with.
     private(set) var runningSystem: ListenSystem?
 
@@ -121,7 +147,7 @@ final class SessionModel {
         attach(self.transport)
         capture.onFrame = { [weak self] pcm in self?.captured(pcm) }
         capture.onWaveform = { [weak self] shape in
-            guard let self, shape.count == Waveform.points * 2 else { return }
+            guard let self, !self.conversationMicrophoneMuted, shape.count == Waveform.points * 2 else { return }
             // While someone keeps speaking the line gains detail, step by step,
             // from the calm shape towards the raw signal; in a pause it calms again.
             let now = Date()
@@ -416,6 +442,7 @@ final class SessionModel {
             case .connected: self?.send(.transportConnected)
             case .disconnected: self?.send(.transportDisconnected)
             case .envelope(let envelope):
+                if case .transcript = envelope.event, self?.conversationMicrophoneMuted == true { return }
                 self?.recorder?.log(envelope.event)
                 if case .state(let state, _) = envelope.event {
                     self?.recorder?.log("session", ["state": String(describing: state)])
@@ -471,6 +498,7 @@ final class SessionModel {
             // Commit useful local memory before starting optional remote work. An expired
             // deadline or background suspension must not erase this conversation's continuity.
             note.summary = assistant.memoryCheckpoint()
+            note.contextStatements = assistant.contextStatements()
             savedNote = sandbox.write(note)
             let prompt = runningSystem?.configuration?.prompts.summary ?? SystemConfig().prompts.summary
             pendingNotes += 1
@@ -743,7 +771,9 @@ final class SessionModel {
                         client: RoutedClient(local: plan.hasLocal ? LocalModelClient() : nil,
                             remote: plan.key.map { OpenRouterClient(key: $0) }, direct: plan.direct),
                         model: model, speaker: TalkBack.speaker(for: conversation), toolStore: toolStore, budgetUSD: plan.settings.limitUSD,
-                        context: AssistantContext(material: TopicMaterial(topic: topic.id).index, earlier: TopicSandbox(topic: topic.id).context()),
+                        context: AssistantContext(material: TopicMaterial(topic: topic.id).index,
+                            earlier: conversation.keepNotes ? TopicSandbox(topic: topic.id).context() : "",
+                            earlierStatements: conversation.keepNotes ? TopicSandbox(topic: topic.id).contextStatements() : []),
                         openingModel: conversation.openingModel.isEmpty ? plan.settings.drafters.first(where: { $0 != model }) : conversation.openingModel,
                         openingReviewer: plan.settings.decisionClient)
                 }
@@ -881,6 +911,7 @@ final class SessionModel {
         default: break
         }
         if case .start = input {
+            setConversationMicrophoneMuted(false)
             conversationActivity.reset()
             quietSeconds = 0
             laidOutCards.removeAll()
@@ -905,6 +936,7 @@ final class SessionModel {
     func captured(_ pcm: Data) {
         let side = frameSide
         frameSide = nil
+        guard !conversationMicrophoneMuted else { return }
         if core.phase == .idle {
             level = level * 0.6 + Self.loudness(of: pcm) * 0.4
             return

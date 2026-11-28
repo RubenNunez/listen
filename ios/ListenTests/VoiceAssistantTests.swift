@@ -1341,7 +1341,7 @@ private actor WorkWireDouble {
         }
         Issue.record("Timed out waiting for a synthetic assistant event")
     }
-    private func setup(standing: Bool = false, maximumTurns: Int = 40, limitModelRequests: Bool = false, timeout: Duration = .seconds(30), budget: Double = .greatestFiniteMagnitude, withTools: Bool = true, storeFile: URL? = nil, adaptive: Bool = false, webSearch: Bool = false, modelName: String = "synthetic", reviewer: (any ModelClient)? = nil, now: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime }) throws -> (VoiceAssistantSession, VoiceModelDouble, VoiceSpeakerDouble, MCPWireDouble) {
+    private func setup(standing: Bool = false, maximumTurns: Int = 40, limitModelRequests: Bool = false, timeout: Duration = .seconds(30), budget: Double = .greatestFiniteMagnitude, withTools: Bool = true, storeFile: URL? = nil, adaptive: Bool = false, webSearch: Bool = false, modelName: String = "synthetic", reviewer: (any ModelClient)? = nil, context: AssistantContext = .init(), keepNotes: Bool = true, now: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime }) throws -> (VoiceAssistantSession, VoiceModelDouble, VoiceSpeakerDouble, MCPWireDouble) {
         let wire = MCPWireDouble(), model = VoiceModelDouble(), speaker = VoiceSpeakerDouble()
         let store = MCPStore(file: storeFile ?? FileManager.default.temporaryDirectory.appending(path: "voice-tests-\(UUID())/mcp.json"),
             readSecret: { _ in nil }, writeSecret: { _, _ in }, deleteSecret: { _ in },
@@ -1351,15 +1351,52 @@ private actor WorkWireDouble {
         topic.language = .en
         var config = VoiceAssistantConfiguration(enabled: true, toolIDs: withTools ? ["home.light"] : [], limitModelRequests: limitModelRequests, maximumTurns: maximumTurns)
         config.adaptiveRouting = adaptive
+        config.keepNotes = keepNotes
         config.webSearch = webSearch
         let system = ListenSystem.builtIns.first { $0.id == "voice-assistant" }!
-        let session = VoiceAssistantSession(topic: topic, system: system, configuration: config, client: model, model: modelName, speaker: speaker, modelTimeout: timeout, reactionDelay: nil, budgetUSD: budget, now: now, openingReviewer: reviewer)
+        let session = VoiceAssistantSession(topic: topic, system: system, configuration: config, client: model, model: modelName, speaker: speaker, modelTimeout: timeout, reactionDelay: nil, budgetUSD: budget, context: context, now: now, openingReviewer: reviewer)
         session.start(store: store)
         return (session, model, speaker, wire)
     }
 
     private func heard(_ id: UInt64, _ text: String, final: Bool = false, revision: Int = 1) -> TranscriptSegment {
         TranscriptSegment(segmentID: id, isFinal: final, revision: revision, voice: nil, speaker: .unknown, text: text, startMs: 0, endMs: 0)
+    }
+
+    @Test func workingContextRetainsEarlierConstraintsWithoutExtraModelCalls() async throws {
+        let (session, model, _, wire) = try setup(withTools: false)
+        defer { session.stop() }
+        await model.configure(output: "A complete synthetic response.")
+        try await wait { session.ready }
+        session.submit("Review the synthetic patch; only inspect files, never deploy.")
+        try await wait { !session.thinking }
+        for index in 0..<20 {
+            session.submit("Unrelated synthetic follow-up \(index).")
+            try await wait { !session.thinking }
+        }
+        session.submit("Continue with the next useful step.")
+        try await wait { !session.thinking }
+        let input = try #require(await model.inputs.last)
+        let payload = try JSONDecoder().decode(HarnessValue.self, from: Data(input.utf8))
+        #expect(payload.object?["working_context"] != nil)
+        guard case .array(let quotes) = payload.object?["working_context"]?.object?["current_conversation"] else { Issue.record("Missing carried context"); return }
+        #expect(quotes.contains { $0.object?["quote"]?.string == "Review the synthetic patch; only inspect files, never deploy." })
+        #expect(await model.inputs.count == 22 && session.modelRequests == 22)
+        #expect(await wire.calls == 0, "retaining context must not create tool actions")
+    }
+
+    @Test func disabledNoteMemoryDoesNotLoadEarlierConversationEvidence() async throws {
+        let archived = AssistantWorkingContext.Archived(conversation: "2026-01-02_12-00-00", quote: "Only the obsolete synthetic constraint.")
+        let (session, model, _, _) = try setup(withTools: false,
+            context: AssistantContext(earlier: "Obsolete synthetic summary.", earlierStatements: [archived]), keepNotes: false)
+        defer { session.stop() }
+        await model.configure(output: "A fresh synthetic answer.")
+        try await wait { session.ready }
+        session.submit("Begin this fresh synthetic task.")
+        try await wait { !session.thinking }
+        let input = try #require(await model.inputs.last)
+        #expect(!input.contains("obsolete") && !input.contains("Obsolete"))
+        #expect(session.contextStatements().isEmpty)
     }
 
     @Test func sentencesOfOneTurnGoOutTogetherAfterAPause() async throws {
@@ -1806,6 +1843,182 @@ private actor WorkWireDouble {
         #expect(speaker.spoken[1].0 == "Die ausführliche Antwort folgt jetzt.")
     }
 
+    @Test func thanksDoesNotCancelPendingRequestButSubstantiveCorrectionDoes() async throws {
+        let (session, model, _, _) = try setup(withTools: false)
+        defer { session.stop() }
+        await model.configure(output: "Eine synthetische Antwort.", suspended: true)
+        try await wait { session.ready }
+        session.submit("Bitte antworte auf Deutsch und erkläre die Auswahl.")
+        try await wait { session.thinking }
+        for _ in 0..<100 { if await model.waitingForCompletion { break }; await Task.yield() }
+        session.receive(heard(91, "Thank", final: false))
+        session.receive(heard(91, "Thank you.", final: true, revision: 2))
+        #expect(session.thinking && session.modelRequests == 1)
+        session.receive(heard(92, "Nein, ich meinte die andere Auswahl.", final: true))
+        try await wait { session.modelRequests == 2 }
+        #expect(!VoiceAssistantSession.isWorkBackchannel(["Danke", "aber", "nein"]))
+        #expect(!VoiceAssistantSession.isWorkBackchannel(["Stopp"]))
+    }
+
+    @Test func microphoneMuteKeepsGenerationAndPlaybackAlive() async throws {
+        let (session, model, speaker, _) = try setup(withTools: false)
+        defer { session.stop() }
+        await model.configure(output: "Die Antwort läuft weiter.", suspended: true)
+        session.setDuplexListening(true)
+        try await wait { session.ready }
+        session.submit("Erkläre das bitte.")
+        for _ in 0..<100 { if await model.waitingForCompletion { break }; await Task.yield() }
+        session.setMicrophoneMuted(true)
+        session.receive(heard(93, "Neue Frage.", final: true))
+        #expect(session.microphoneMuted && !session.paused && session.thinking && session.modelRequests == 1)
+        await model.finish()
+        try await wait { session.audible }
+        let stops = speaker.stops
+        session.microphoneActivity(speechSeconds: 2, quietSeconds: 0)
+        session.receive(heard(94, "Stopp.", final: true))
+        #expect(session.audible && speaker.stops == stops && !session.hearing)
+        session.setMicrophoneMuted(false)
+        session.receive(heard(95, "Eine andere richtige Frage.", final: true))
+        try await wait { session.modelRequests == 2 }
+    }
+
+    @Test func mutingCommitsFullyRecognizedSentencesOnce() async throws {
+        let (session, model, _, wire) = try setup(withTools: false)
+        defer { session.stop() }
+        await model.configure(output: "A synthetic reply.", suspended: true)
+        try await wait { session.ready }
+        session.setDuplexListening(true)
+        session.heardQuiet(for: 0)
+        session.receive(heard(101, "Explain the selected example.", final: true))
+        session.receive(heard(102, "Use the second version.", final: true))
+        #expect(await model.inputs.isEmpty)
+
+        session.setMicrophoneMuted(true)
+        try await wait { session.modelRequests == 1 }
+        #expect(session.lastUser == "Explain the selected example. Use the second version.")
+        #expect(session.microphoneMuted && !session.hearing)
+        #expect(await wire.calls == 0, "muting does not bypass the normal model/tool permissions")
+        session.receive(heard(103, "Must stay discarded.", final: true, revision: 2))
+        session.setMicrophoneMuted(true)
+        session.setMicrophoneMuted(false)
+        session.heardQuiet(for: 5)
+        #expect(session.modelRequests == 1)
+    }
+
+    @Test func mutingAnUnfinishedDraftDoesNotSubmitIt() async throws {
+        let (session, model, _, _) = try setup(withTools: false)
+        defer { session.stop() }
+        try await wait { session.ready }
+        session.setDuplexListening(true)
+        session.heardQuiet(for: 0)
+        session.receive(heard(104, "An unfinished draft", final: false))
+        session.setMicrophoneMuted(true)
+        session.setMicrophoneMuted(false)
+        session.heardQuiet(for: 5)
+        #expect(await model.inputs.isEmpty)
+        #expect(session.lastUser.isEmpty && !session.hearing)
+    }
+
+    @Test func finalizingAnUnchangedDraftBeforeMutePreservesIt() async throws {
+        let (session, model, _, _) = try setup(withTools: false)
+        defer { session.stop() }
+        await model.configure(output: "A synthetic reply.")
+        try await wait { session.ready }
+        session.setDuplexListening(true)
+        session.heardQuiet(for: 0)
+        session.receive(heard(105, "Explain the example.", final: false))
+        session.receive(heard(105, "Explain the example.", final: true, revision: 2))
+        session.setMicrophoneMuted(true)
+        try await wait { session.modelRequests == 1 }
+        #expect(session.lastUser == "Explain the example.")
+    }
+
+    @Test func mutingDoesNotCommitWordsAfterAnUnfinishedGap() async throws {
+        let (session, model, _, _) = try setup(withTools: false)
+        defer { session.stop() }
+        try await wait { session.ready }
+        session.setDuplexListening(true)
+        session.heardQuiet(for: 0)
+        session.receive(heard(106, "An unfinished earlier clause", final: false))
+        session.receive(heard(107, "A later final sentence.", final: true))
+        session.setMicrophoneMuted(true)
+        session.setMicrophoneMuted(false)
+        session.heardQuiet(for: 5)
+        #expect(await model.inputs.isEmpty, "do not silently remove a gap from an instruction")
+    }
+
+    @Test func mutingDoesNotDropAnUnfinishedConstraintFromAFinalSentence() async throws {
+        let (session, model, _, wire) = try setup()
+        defer { session.stop() }
+        try await wait { session.ready }
+        session.setDuplexListening(true)
+        session.heardQuiet(for: 0)
+        session.receive(heard(110, "Turn off all the synthetic lamps.", final: true))
+        session.receive(heard(111, "No, only in the demo room", final: false))
+        session.setMicrophoneMuted(true)
+        session.setMicrophoneMuted(false)
+        session.heardQuiet(for: 5)
+        #expect(await model.inputs.isEmpty)
+        #expect(session.pending.isEmpty && session.lastUser.isEmpty)
+        #expect(await wire.calls == 0, "a truncated correction must never widen an action")
+    }
+
+    @Test func aRevisedUnfinishedSentenceIsNotCommittedByMute() async throws {
+        let (session, model, _, _) = try setup(withTools: false)
+        defer { session.stop() }
+        try await wait { session.ready }
+        session.setDuplexListening(true)
+        session.heardQuiet(for: 0)
+        session.receive(heard(108, "Explain the example.", final: true))
+        session.receive(heard(108, "Explain the example, but", final: false, revision: 2))
+        session.setMicrophoneMuted(true)
+        session.setMicrophoneMuted(false)
+        session.heardQuiet(for: 5)
+        #expect(await model.inputs.isEmpty)
+    }
+
+    @Test func mutingNeverResubmitsAnEarlierCommittedPrefix() async throws {
+        var clock = 0.0
+        let (session, model, _, _) = try setup(withTools: false, now: { clock })
+        defer { session.stop() }
+        await model.configure(output: "A synthetic reply.", suspended: true)
+        try await wait { session.ready }
+        session.setDuplexListening(true)
+        session.heardQuiet(for: 0)
+        session.receive(heard(109, "Explain the example", final: false))
+        clock = 1
+        session.heardQuiet(for: 1)
+        try await wait { session.modelRequests == 1 }
+        session.receive(heard(109, "Explain the example", final: true, revision: 2))
+        session.setMicrophoneMuted(true)
+        session.setMicrophoneMuted(false)
+        #expect(session.modelRequests == 1, "a late final of consumed words is not a new request")
+        session.heardQuiet(for: 0)
+        session.receive(heard(109, "Explain the example in French.", final: true, revision: 3))
+        session.setMicrophoneMuted(true)
+        session.setMicrophoneMuted(false)
+        session.heardQuiet(for: 5)
+        #expect(session.modelRequests == 1, "a borrowed prefix is not a wholly finalized new turn")
+        #expect(session.lastUser == "Explain the example")
+    }
+
+    @Test func identicalPendingPermissionIsShownOnceAndDispatchesOnce() async throws {
+        let (session, _, _, wire) = try setup()
+        defer { session.stop() }
+        try await wait { session.ready }
+        session.submit("Turn on the synthetic lamp.")
+        try await wait { session.pending.count == 1 }
+        let first = try #require(session.pending.first)
+        session.submit("Turn on the same synthetic lamp.")
+        try await wait { session.modelRequests == 2 && !session.thinking }
+        #expect(session.pending.count == 1 && session.pending.first?.id == first.id)
+        #expect(await wire.calls == 0)
+        session.decide(first, allow: true)
+        try await wait { session.pending.isEmpty }
+        for _ in 0..<100 { if await wire.calls == 1 { break }; await Task.yield() }
+        #expect(await wire.calls == 1)
+    }
+
     @Test func aBackchannelDoesNotCutAnExplanationButACorrectionStillDoes() async throws {
         let (session, model, speaker, _) = try setup(withTools: false)
         defer { session.stop() }
@@ -2039,7 +2252,10 @@ private actor WorkWireDouble {
             try await wait { queued }
             #expect(await wire.calls == 1 && voice.stops == stops)
             #expect(voice.spoken.count == (alreadySpeaking ? 1 : 0))
-            if !alreadySpeaking { await model.finish() }
+            if !alreadySpeaking {
+                await model.configure(output: #"{"speech":"The explanation finishes before the tool report.","calls":[]}"#)
+                await model.finish()
+            }
             try await wait { !session.thinking && voice.spoken.count == 1 }
             #expect(voice.spoken[0].0 == "The explanation finishes before the tool report.")
             let reply = try #require(session.lastReplyID)
@@ -2048,6 +2264,40 @@ private actor WorkWireDouble {
             try await wait { voice.spoken.count == 2 }
             #expect(voice.spoken[1].0 == "The service has responded. Details are available in the app.")
             #expect(session.lastToolDetail == "Synthetic lamp acknowledged.")
+        }
+    }
+
+    @Test func newerToolReceiptRefreshesStaleReplyAndSurvivesInterruption() async throws {
+        for routedWithoutTools in [false, true] {
+            let router = VoicePlannerDouble()
+            await router.configure(tier: "luna", usesTools: true, usesWeb: false)
+            let (session, model, voice, wire) = try setup(adaptive: routedWithoutTools, reviewer: router)
+            defer { session.stop() }
+            try await wait { session.ready }
+            session.submit("Turn on the synthetic lamp.")
+            try await wait { session.pending.count == 1 && !session.thinking }
+            let action = try #require(session.pending.first)
+            if routedWithoutTools { await router.configure(tier: "luna", usesTools: false, usesWeb: false) }
+            await model.configure(output: routedWithoutTools ? "The action is still unconfirmed." : #"{"speech":"The action is still unconfirmed.","calls":[]}"#, suspended: true)
+            session.submit("Has that action finished?")
+            for _ in 0..<200 { if await model.waitingForCompletion { break }; await Task.yield() }
+            session.decide(action, allow: true)
+            try await wait { session.state.operation(action.id)?.state.wasDispatched == true && session.pending.isEmpty }
+            for _ in 0..<200 { if await wire.calls == 1 { break }; await Task.yield() }
+            try await wait { session.state.operation(action.id)?.state.isFinal == true }
+            await model.configure(output: routedWithoutTools ? "The observed action has finished." : #"{"speech":"The observed action has finished.","calls":[]}"#)
+            await model.finish()
+            try await wait { !session.thinking && voice.spoken.count == 1 }
+            #expect(voice.spoken[0].0 == "The observed action has finished.")
+            #expect(await model.inputs.last?.contains("observed_tool_result") == true)
+            #expect(await wire.calls == 1, "refreshing dialogue must not repeat the mutation")
+            session.interrupt()
+            await model.configure(output: routedWithoutTools ? "A new explanation." : #"{"speech":"A new explanation.","calls":[]}"#)
+            session.submit("Explain another topic.")
+            try await wait { voice.spoken.count == 2 }
+            voice.finished?(voice.spoken[1].1)
+            try await wait { voice.spoken.count == 3 }
+            #expect(voice.spoken[2].0 == "The service has responded. Details are available in the app.")
         }
     }
 

@@ -65,6 +65,7 @@ import Observation
     /// The player has begun a sentence of the speech under way.
     private(set) var audible = false
     private(set) var paused = false
+    private(set) var microphoneMuted = false
     /// A round of the roles is working on a sentence.
     private(set) var thinking = false
     /// The microphone hears more than room noise.
@@ -213,12 +214,12 @@ import Observation
     var voice: AssistantVoiceChoice { AssistantVoiceChoice(configuration) }
     /// Listen's own voice, and a sample, must not come back as something that was said.
     private(set) var listensWhileSpeaking = false
-    var blocksRecognition: Bool { !listensWhileSpeaking && (speaking || settling || preview.playing != nil || ThinkingCuePreview.shared.playing) }
+    var blocksRecognition: Bool { microphoneMuted || !listensWhileSpeaking && (speaking || settling || preview.playing != nil || ThinkingCuePreview.shared.playing) }
 
     func setDuplexListening(_ enabled: Bool) { listensWhileSpeaking = enabled }
 
     func microphoneActivity(speechSeconds: Double) {
-        guard listensWhileSpeaking, !paused, !stopped, speechSeconds >= 0.2 else { return }
+        guard listensWhileSpeaking, !paused, !microphoneMuted, !stopped, speechSeconds >= 0.2 else { return }
         if speaking || preview.playing != nil {
             record?("voice_barge_in", ["state": "microphone", "speech_s": speechSeconds])
             if reacting { stopReaction() } else { interrupt() }
@@ -258,6 +259,7 @@ import Observation
 
     func receive(_ event: ServerEvent) {
         guard !stopped else { return }
+        if case .transcript = event, microphoneMuted { return }
         switch event {
         case .transcript(let segment): heard(segment)
         case .cardSuperseded(let id, _):
@@ -782,6 +784,14 @@ import Observation
         guard speech != nil else { return }
         voiceOutput.stop()
         ended("cancelled")
+    }
+
+    func setMicrophoneMuted(_ muted: Bool) {
+        microphoneMuted = muted
+        unfinished = nil
+        hearing = false
+        quiet = muted ? .infinity : 0
+        if muted { advance() }
     }
 
     func setPaused(_ paused: Bool) {

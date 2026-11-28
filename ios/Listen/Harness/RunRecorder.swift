@@ -65,6 +65,7 @@ final class RunRecorder {
     private var sides: FileHandle?
     private var events: FileHandle?
     private var audioBytes = 0
+    private var mutedSince: Double?
     private var outputBuffers = 0
     private var meta: [String: Any]
 
@@ -108,12 +109,34 @@ final class RunRecorder {
         }
     }
 
+    /// Preserve replay time with generated silence, never microphone samples. TTS and
+    /// tool events continue on the same clock while capture is muted.
+    func setMicrophoneMuted(_ muted: Bool, at time: Double = ProcessInfo.processInfo.systemUptime) {
+        guard audio != nil else { return }
+        if muted {
+            guard mutedSince == nil else { return }
+            mutedSince = time
+            log("microphone", ["muted": true])
+        } else if let start = mutedSince {
+            mutedSince = nil
+            let seconds = max(0, time - start)
+            var bytes = Int(seconds * WireProtocol.sampleRate) * 2
+            let silence = Data(count: WireProtocol.frameBytes)
+            while bytes > 0 {
+                let count = min(bytes, silence.count)
+                audio(silence.prefix(count))
+                bytes -= count
+            }
+            log("microphone", ["muted": false, "generated_silence_seconds": seconds])
+        }
+    }
+
     /// 16-bit samples as captured, and while an app's sound is mixed in, how loud each side
     /// was. The sides go to `sides.bin`: for every 100 ms frame of `audio.wav`, two little-endian
     /// UInt16, the microphone's and the app's RMS times 65 534; 65 535 for a frame without sides.
     /// They are the truth about who spoke in a call, for measuring speaker labels later.
     func audio(_ pcm: Data, side: (mine: Float, theirs: Float)? = nil) {
-        guard let audio else { return }
+        guard mutedSince == nil, let audio else { return }
         if audioBytes == 0 {
             log("audio_clock", ["sample": 0, "sample_rate": WireProtocol.sampleRate,
                 "first_frame_seconds": Double(pcm.count) / 2 / WireProtocol.sampleRate,
@@ -266,6 +289,7 @@ final class RunRecorder {
     }
 
     func finish() {
+        setMicrophoneMuted(false)
         if Self.assistantOutput === self { Self.assistantOutput = nil }
         guard let audio else { return }
         // The header was written for an empty file; now the length is known.

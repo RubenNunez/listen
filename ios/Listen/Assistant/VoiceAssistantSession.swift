@@ -38,6 +38,7 @@ final class VoiceAssistantSession {
     private(set) var ready = false
     private(set) var speaking = false
     private(set) var paused = false
+    private(set) var microphoneMuted = false
     private(set) var thinking = false
     private(set) var settling = false
     /// The reply's voice is playing: not only asked to speak, but audible.
@@ -139,6 +140,8 @@ final class VoiceAssistantSession {
     @ObservationIgnored private var setup: Task<Void, Never>?
     @ObservationIgnored private var spoken: ConversationResponseID?
     @ObservationIgnored private var reportingTool = false
+    @ObservationIgnored private var observedToolVersion = 0
+    @ObservationIgnored private var coalescedOperations: Set<ConversationOperationID> = []
     @ObservationIgnored private var waitingToolReports: [(text: String, detail: String?)] = []
     @ObservationIgnored private var settlingTask: Task<Void, Never>?
     @ObservationIgnored private let modelTimeout: Duration
@@ -147,7 +150,7 @@ final class VoiceAssistantSession {
     @ObservationIgnored private var noteStarted = false
     @ObservationIgnored private var earlySpeech: [UInt64: TranscriptSegment] = [:]
     /// The person's turn so far, by recogniser segment, until a pause ends it (`heardQuiet`).
-    @ObservationIgnored private var turn: [(segment: UInt64, text: String, recognizedWords: [String])] = []
+    @ObservationIgnored private var turn: [(segment: UInt64, text: String, recognizedWords: [String], isFinal: Bool)] = []
     @ObservationIgnored private var turnPrefix: String?
     @ObservationIgnored private var turnRevision = 0
     @ObservationIgnored private var turnSpeaker = SpeakerLabel.unknown
@@ -214,6 +217,10 @@ final class VoiceAssistantSession {
         self.modelTimeout = modelTimeout
         self.budgetUSD = budgetUSD
         self.context = context
+        if !configuration.keepNotes {
+            self.context.earlier = ""
+            self.context.earlierStatements = []
+        }
         state = ConversationState(binding: .init(session: .init(UUID().uuidString), topic: topic.id,
             system: system.id, systemSnapshot: HarnessJSON.hash(Data((system.configuration ?? SystemConfig()).json.utf8))))
         connectSpeaker()
@@ -322,7 +329,7 @@ final class VoiceAssistantSession {
 
     /// A voice sample is heard by the microphone like a reply, so it blocks recognition too.
     var blocksRecognition: Bool {
-        paused || (!listensWhileSpeaking && (speaking || settling || preview.playing != nil || ThinkingCuePreview.shared.playing))
+        microphoneMuted || paused || (!listensWhileSpeaking && (speaking || settling || preview.playing != nil || ThinkingCuePreview.shared.playing))
     }
 
     func setDuplexListening(_ enabled: Bool) {
@@ -334,7 +341,7 @@ final class VoiceAssistantSession {
     /// Actual reply playback yields on acoustically supported new ASR words (including
     /// partials), rather than cutting out after any two loud microphone frames.
     func microphoneActivity(speechSeconds: Double, quietSeconds: Double) {
-        guard listensWhileSpeaking, active, !paused else { return }
+        guard listensWhileSpeaking, active, !paused, !microphoneMuted else { return }
         if quietSeconds >= 0.3 { inputSpeaking = false }
         if speechSeconds >= 0.2 {
             let onset = !inputSpeaking
@@ -476,6 +483,17 @@ final class VoiceAssistantSession {
         // it ended, while the ready answer is held for quiet. It is still a backchannel then,
         // not a new turn that would replace that answer.
         let heldAnswer = heldAfterAcknowledgement != nil && !speaking && turn.isEmpty
+        // Hold an unfinished "Thank..." without consuming it: a later substantive
+        // revision still keeps every word and may interrupt normally.
+        if (thinking || waitingForTools), !segment.isFinal, turn.isEmpty, fresh.count == 1,
+           fresh[0].lowercased().filter(\.isLetter) == "thank" { return }
+        if (thinking || waitingForTools || !waitingToolReports.isEmpty), turn.isEmpty,
+           pending.isEmpty, !lastReply.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("?"),
+           Self.isWorkBackchannel(fresh) {
+            consumeWithoutTurn(segment)
+            record?("voice_backchannel", ["state": "kept_pending_work", "words": fresh.count])
+            return
+        }
         if listensWhileSpeaking, (speaking && (spoken != nil || acknowledgementStarted)) || heldAnswer,
            !lastReply.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("?"),
            Self.isBackchannel(fresh) {
@@ -613,12 +631,15 @@ final class VoiceAssistantSession {
             turnPrefix = previous.text
         }
         let index = turn.firstIndex { $0.segment == segment.segmentID }
+        // A final result can contain exactly the same words as its draft.
+        // Keep its completion state even when no text revision is needed.
+        if let index { turn[index].isFinal = segment.isFinal }
         hearing = true
         if index.map({ turn[$0].text != fresh }) ?? true {
             if let index {
                 turn[index].text = fresh
                 turn[index].recognizedWords = words
-            } else { turn.append((segment.segmentID, fresh, words)) }
+            } else { turn.append((segment.segmentID, fresh, words, segment.isFinal)) }
             turnSpeaker = segment.speaker
             turnChangedAt = now()
             turnRevision += 1
@@ -703,8 +724,7 @@ final class VoiceAssistantSession {
             waitingWorkReplies.removeAll()
         }
         if !waitingToolReports.isEmpty {
-            record?("voice_tool_feedback", ["state": "discarded_on_interruption", "count": waitingToolReports.count])
-            waitingToolReports.removeAll()
+            record?("voice_tool_feedback", ["state": "preserved_on_interruption", "count": waitingToolReports.count])
         }
         reportingTool = false
         let hadPlayback = speaking
@@ -740,8 +760,30 @@ final class VoiceAssistantSession {
         }
     }
 
+    func setMicrophoneMuted(_ muted: Bool) {
+        guard microphoneMuted != muted else { return }
+        microphoneMuted = muted
+        // Muting closes the person's input. Finished sentences may still be waiting
+        // for an acoustic pause, especially in a noisy room: do not silently lose
+        // them. Submit a completely finalized turn through the normal turn/permission
+        // path. Never drop an unfinished correction or constraint from that turn.
+        // A late continuation borrowing an earlier committed prefix is not a
+        // new, wholly finalized turn. Keep the conservative discard for that case.
+        if muted, active, ready, !paused, turnPrefix == nil, !turn.isEmpty, turn.allSatisfy(\.isFinal) {
+            record?("voice_turn_boundary", ["reason": "microphone_muted", "sentences": turn.count])
+            endTurn()
+        }
+        // Keep generation, playback and concrete operation receipts alive.
+        turn.removeAll()
+        turnPrefix = nil
+        finishing = nil
+        inputSpeaking = false
+        hearing = false
+    }
+
     func setPaused(_ paused: Bool) {
         self.paused = paused
+        if !paused { drainWorkReplies(); drainToolReports() }
         if paused {
             interrupt()
             turn.removeAll()
@@ -759,6 +801,7 @@ final class VoiceAssistantSession {
         settlingTask?.cancel()
         settling = false
         pending.removeAll()
+        waitingToolReports.removeAll()
         for task in generation.values { task.cancel() }
         thinking = false
         if let gateway { Task { await gateway.stop() } }
@@ -820,6 +863,12 @@ final class VoiceAssistantSession {
                     guard active else { return }
                     guard let operation = state.operation(request.id), operation.state == .proposed || operation.state == .awaitingAuthorization else { return }
                     if authorization == .awaitingOwner {
+                        if pending.contains(where: { $0.capability == request.capability && $0.arguments == request.arguments }) {
+                            coalescedOperations.insert(request.id)
+                            record?("voice_operation", ["id": request.id.rawValue, "state": "coalesced_pending_confirmation"])
+                            send(.operationWithdrawn(operation: request.id))
+                            return
+                        }
                         pending.append(request); onAuthorization?(request)
                         record?("voice_operation", ["id": request.id.rawValue, "capability": request.capability.rawValue,
                             "state": "awaiting_confirmation", "arguments": request.arguments.mapValues(\.harness).mapValues { String(describing: $0) }])
@@ -845,6 +894,8 @@ final class VoiceAssistantSession {
                     }
                 }
             case .reportOperation(let id, let result):
+                if coalescedOperations.remove(id) != nil { scheduledOperations.remove(id); continue }
+                if result.wasDispatched { observedToolVersion += 1 }
                 let request = state.operation(id)?.request
                 let tool = tools.first { $0.capability == request?.capability }?.descriptor.name
                 guard let text = AssistantToolFeedback.speech(for: result, tool: tool,
@@ -881,9 +932,9 @@ final class VoiceAssistantSession {
         }
     }
 
-    private func request(_ turn: ConversationTurn) {
+    private func request(_ turn: ConversationTurn, refreshingObservation: Bool = false) {
         lastToolDetail = nil
-        record?("voice_user", ["text": turn.text, "turn": turn.id.rawValue])
+        if !refreshingObservation { record?("voice_user", ["text": turn.text, "turn": turn.id.rawValue]) }
         // Interrupt old generation, while already dispatched tools keep their own state.
         let preparation = prepared
         prepared = .init()
@@ -904,7 +955,8 @@ final class VoiceAssistantSession {
         failure = nil
         thinking = true
         send(.responseStarted(response: response, inReplyTo: turn.id))
-        history.append(.object(["role": .string("user"), "text": .string(turn.text)]))
+        if !refreshingObservation { history.append(.object(["role": .string("user"), "text": .string(turn.text)])) }
+        let observationVersion = observedToolVersion
         let payload: HarnessValue = .object([
             "topic": .object(["name": .string(topic.name), "notes": .string(String(topic.notes.prefix(8000))), "language": .string(topic.language.rawValue)]),
             "voice": .object(["engine": .string(configuration.talkBackEngine.rawValue),
@@ -915,13 +967,14 @@ final class VoiceAssistantSession {
                 "source_repository": .string("https://github.com/RubenNunez/listen"),
                 "source_repository_user_ownership": .string("unknown"),
                 "topic_memory_enabled": .bool(configuration.keepNotes),
-                "memory_policy": .string(configuration.keepNotes ? "local_user_checkpoint_before_optional_summary" : "disabled"),
+                "memory_policy": .string(configuration.keepNotes ? "local_user_checkpoint_and_source_quotes_before_optional_summary" : "disabled"),
                 "selected_repositories": .array(topic.repositories.map(HarnessValue.string))]),
             "public_web_search": .object(["available_to_answer_workers": .bool(hasPublicWeb)]),
             "local_workflows": .object(["kind": .string("action_wait_action"), "maximum_wait_seconds": .number(30),
                 "scope": .string("active_conversation_only"), "running": .array(localSequences.map { .object([
                     "request": .string($0.request), "status": .string($0.waitingUntil == nil ? "running" : "waiting")]) })]),
             "messages": .array(Array(history.suffix(16))),
+            "working_context": AssistantWorkingContext.payload(messages: history, request: turn.text, earlier: context.earlierStatements),
             "tools": .array(tools.map { .object(["id": .string($0.capability.rawValue), "description": .string($0.descriptor.description), "inputSchema": .object($0.descriptor.inputSchema)]) }),
             "unavailableTools": .array(missing.map(HarnessValue.string)),
             "recent_actions": .array(state.operations.suffix(8).map { operation in
@@ -1000,6 +1053,8 @@ final class VoiceAssistantSession {
             var output = ""
             var directReply = AssistantReplyText(speaksText: available.isEmpty, dropsLinks: searchesWeb)
             var streamingStarted = false
+            var bufferedDirectSentences: [String] = []
+            var buffersForObservation = false
             // Only what the provider reported: searches it finished and pages it cited.
             var searches = 0
             var sources: [URL] = []
@@ -1051,6 +1106,7 @@ final class VoiceAssistantSession {
                 let web = planning.usesWeb && (configuration.webSearch || marked) ? VoiceAssistantConfiguration.webSearchModel(model) : nil
                 requestModel = web ?? (planning.usesWeb ? model : VoiceAssistantConfiguration.withoutWeb(model)); searchesWeb = web != nil
                 let instructions = configuration.replyInstructions(hasTools: !available.isEmpty, searchesWeb: searchesWeb, toolsWithheld: toolsWithheld)
+                    + (refreshingObservation ? "\nNative tool outcomes changed during the previous generation. Use the latest observed_tool_result and recent_actions. Answer the same current user request. Do not repeat any earlier operation; an unknown outcome never grants permission to retry." : "")
                     + (configuration.parallelOpening || planning.filler != nil ? "\nA separate native lane handles the conversational wait. Begin your own speech with the substantive answer; do not repeat a waiting phrase or process preamble." : "")
                 directReply = AssistantReplyText(speaksText: available.isEmpty, dropsLinks: searchesWeb)
                 var fields = payload.object ?? [:]
@@ -1071,6 +1127,10 @@ final class VoiceAssistantSession {
                 if tier != .luna && planning.filler == nil {
                     startParallelOpening(response, input: input, utterance: turn.text, directText: available.isEmpty)
                 }
+                if refreshAfterObservation(turn, response: response, since: observationVersion, alreadyRefreshed: refreshingObservation) { return }
+                // Even a tool-withheld/status question can depend on a pending action.
+                // Buffer that direct reply until it can be checked against fresh receipts.
+                buffersForObservation = state.operations.contains { $0.state == .dispatched || $0.state == .awaitingAuthorization }
                 mainReservations.remove(response); ownsMainReservation = false; startedModelRequests += 1
                 record?("voice_model", ["model": model, "state": "requested"])
                 record?("model_request", ["request_id": response.rawValue, "model": model, "agent": "voice",
@@ -1089,8 +1149,12 @@ final class VoiceAssistantSession {
                         output += text
                         let sentences = try directReply.append(text)
                         if !sentences.isEmpty {
-                            try await beforeReply(response)
-                            appendReply(sentences, response: response, started: &streamingStarted)
+                            if buffersForObservation { bufferedDirectSentences += sentences }
+                            else {
+                                try await beforeReply(response)
+                                if refreshAfterObservation(turn, response: response, since: observationVersion, alreadyRefreshed: refreshingObservation) { return }
+                                appendReply(sentences, response: response, started: &streamingStarted)
+                            }
                         }
                     case .usage(let value): usage = value
                     case .cost(let value): if value.isFinite, value >= 0 { cost = value }
@@ -1122,8 +1186,9 @@ final class VoiceAssistantSession {
                 }
                 if available.isEmpty {
                     let reply = try directReply.finish()
+                    if refreshAfterObservation(turn, response: response, since: observationVersion, alreadyRefreshed: refreshingObservation) { return }
                     outcome = "completed"
-                    appendReply(reply.remaining, response: response, started: &streamingStarted)
+                    appendReply(bufferedDirectSentences + reply.remaining, response: response, started: &streamingStarted)
                     partialReply = nil
                     history.append(assistantMessage(reply.text, sources: sources, response: response))
                     record?("voice_reply", ["text": reply.text, "response": response.rawValue])
@@ -1136,6 +1201,7 @@ final class VoiceAssistantSession {
                     // A complete plain spoken reply cannot propose an operation. Some
                     // providers omit the JSON wrapper for a follow-up despite bound
                     // tools. Retain that answer without repairing any structured call.
+                    if refreshAfterObservation(turn, response: response, since: observationVersion, alreadyRefreshed: refreshingObservation) { return }
                     let decision: AssistantDecision
                     do {
                         decision = try AssistantDecision.readWork(output, tools: available, allowPlainAnswer: true)
@@ -1153,6 +1219,10 @@ final class VoiceAssistantSession {
                         guard active, state.response(response)?.status == .generating else { throw CancellationError() }
                         decision = try AssistantDecision.read(repaired, tools: available)
                         record?("voice_format_recovery", ["response": response.rawValue, "state": "validated"])
+                    }
+                    if refreshAfterObservation(turn, response: response, since: observationVersion, alreadyRefreshed: refreshingObservation) {
+                        outcome = "superseded_by_tool_observation"
+                        return
                     }
                     outcome = "completed"
                     if decision.calls.isEmpty {
@@ -1181,6 +1251,18 @@ final class VoiceAssistantSession {
                 send(.interrupted(response: response))
             }
         }
+    }
+
+    /// A model's earlier snapshot cannot overrule a newer native receipt. Refresh at
+    /// most once, before any buffered speech or proposed operation is committed.
+    private func refreshAfterObservation(_ turn: ConversationTurn, response: ConversationResponseID,
+                                         since version: Int, alreadyRefreshed: Bool) -> Bool {
+        guard observedToolVersion != version else { return false }
+        record?("voice_observation_refresh", ["response": response.rawValue,
+            "state": alreadyRefreshed ? "bounded_to_latest_receipts" : "refreshing_current_request"])
+        send(.responseCompleted(response: response))
+        if !alreadyRefreshed { request(turn, refreshingObservation: true) }
+        return true
     }
 
     private struct WorkResult: Sendable {
@@ -1531,6 +1613,11 @@ final class VoiceAssistantSession {
         }
     }
 
+    nonisolated static func isWorkBackchannel(_ words: [String]) -> Bool {
+        let normalized = words.map { $0.lowercased().filter(\.isLetter) }.filter { !$0.isEmpty }.joined(separator: " ")
+        return isBackchannel(words) || ["thank you", "thanks", "danke", "danke schön", "dankeschön"].contains(normalized)
+    }
+
     nonisolated static func isBackchannel(_ words: [String]) -> Bool {
         let words = words.map { $0.lowercased().filter(\.isLetter) }.filter { !$0.isEmpty }
         let acknowledgement: Set<String> = ["ja", "jaja", "mhm", "hm", "aha", "genau", "okay", "ok", "yes", "right"]
@@ -1601,6 +1688,7 @@ final class VoiceAssistantSession {
         preparationTask?.cancel()
         let epoch = preparationEpoch
         let payload: HarnessValue = .object(["topic": .string(topic.name), "language": .string(topic.language.rawValue),
+            "working_context": AssistantWorkingContext.payload(messages: history, request: utterance, earlier: context.earlierStatements),
             "latest_user": .string(utterance), "generated_answer": .string(String(answer.prefix(3000))),
             "source_addresses_only": .array(sources.prefix(5).map { .string($0.absoluteString) })])
         preparationTask = Task { [weak self] in
@@ -1953,6 +2041,10 @@ final class VoiceAssistantSession {
     /// Post-stop text only: no tools, playback or changes to conversation state.
     func memoryCheckpoint() -> String? {
         AssistantMemoryCheckpoint.text(messages: history, language: topic.language)
+    }
+
+    func contextStatements() -> [String] {
+        configuration.keepNotes ? AssistantWorkingContext.retainedStatements(history) : []
     }
 
     /// Optional enhancement of the already-saved local checkpoint.

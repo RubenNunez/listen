@@ -3,6 +3,30 @@ import Testing
 @testable import Listen
 
 @MainActor @Suite struct TerminalInterface {
+    @Test @MainActor func microphoneMuteRecordsSilenceWithoutCompressingReplayTime() throws {
+        let root = URL.temporaryDirectory.appending(path: "mute-replay-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let recorder = try #require(RunRecorder(topic: "Synthetic mute", language: "en", root: root))
+        let input = Data(repeating: 1, count: WireProtocol.frameBytes)
+        recorder.audio(input)
+        recorder.setMicrophoneMuted(true, at: 10)
+        recorder.audio(input) // A late callback must not enter the recording.
+        recorder.setMicrophoneMuted(false, at: 12)
+        recorder.audio(input)
+        recorder.finish()
+        let wav = try Data(contentsOf: recorder.directory.appending(path: "audio.wav"))
+        #expect(wav.count == 44 + input.count * 2 + 64_000)
+        #expect(wav[(44 + input.count)..<(44 + input.count + 64_000)].allSatisfy { $0 == 0 })
+    }
+
+    @Test func recognitionTimestampsIncludeMuteGapsWithoutMovingEarlierSpeech() {
+        let gaps: [(after: Double, duration: Double)] = [(1, 2), (4, 3)]
+        #expect(LocalTransport.recordingTime(0.9, gaps: gaps) == 0.9)
+        #expect(LocalTransport.recordingTime(1, gaps: gaps) == 3)
+        #expect(LocalTransport.recordingTime(3, gaps: gaps) == 5)
+        #expect(LocalTransport.recordingTime(4, gaps: gaps) == 9)
+    }
+
     @Test func theTestHostCannotRequestOrOpenAPhysicalMicrophone() async throws {
         try #require(AudioCapture.physicalInputDisabled, "the TestAction must disable physical capture")
         #if !targetEnvironment(simulator)
