@@ -293,3 +293,19 @@ behavior and the physical-microphone test guard. Models, tools and speakers in t
 conversation tests are synthetic. This checks turn handoff, not acoustic accuracy
 or conversational latency. Installed build 57 does not contain this correction;
 physical iPhone acceptance remains pending.
+
+### Shared desktop conversation settings
+
+The assistant and spoken-card modes share the top Settings entry on Mac Catalyst
+and iPhone. Secondary voice, source and display controls live in its sheet;
+microphone mute, stop, action confirmations, recording status and operational
+errors remain in the conversation. Settings has a Command-comma shortcut. Ready
+voice notices move into Settings; a missing-model download retains its license
+notice before installation. This changes presentation, not tool grants or routing.
+
+Both iOS and Mac Catalyst SDK builds passed for these five view-source files,
+with independent source review and byte-for-byte verification of the Mac build
+input. These were build-only checks: no test microphone, speaker playback or
+device action was started. Actual narrow/wide window appearance and keyboard
+focus have not been accepted in a running app. No device upgrade is claimed by
+these checks.
