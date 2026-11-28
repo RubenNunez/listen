@@ -184,7 +184,21 @@ statement sidecars are excluded; within-session working context still works.
 
 Seven focused Foundation checks passed for cross-domain continuity, source-role isolation,
 corrections, bounded complete quotations, dated provenance and local persistence/clearing.
-Native integration checks and the combined client candidate remain pending at this commit.
-`WorkingContextModelProbe` is an explicit opt-in four-call synthetic comparison against the
-recent-history-only input using the existing model adapter, silent output and no tools.
-Its tiny writing/choice rubric is not a general intelligence or voice-speed benchmark.
+The combined build 56 (voice controls, working context and orb rest-pose fix) passed 39
+focused native checks, including two session-level continuity/memory-opt-out regressions,
+five orb checks and two decoder-failure feedback cases. Signed iPhone and Mac Catalyst
+builds succeeded. Synthetic task continuity used the existing main calls without adding
+retention calls; it made no external tool changes.
+
+`WorkingContextModelProbe` completed four typed synthetic model calls comparing recent
+history alone with retained quotations. The recent-history writing case lacked the earlier
+recipient/task details; the retained version supplied the requested two-sentence message.
+The retained choice response kept an earlier rejected option excluded. This is a small,
+ordered paired probe through the existing adapter with silent output and no tools. Call
+order, caching and provider conditions were not controlled; its task-specific rubric and
+first-text measurements are not a general intelligence or voice-speed benchmark.
+
+A typed `playback_failed` result with verified audio identifies the found language and
+explains the failed player start. Player cleanup to idle does not turn that failure into
+missing-language availability. Unverified language metadata never creates a language
+claim or an automatic fallback; raw service speech and diagnostic codes stay unspoken.
