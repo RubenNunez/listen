@@ -323,19 +323,11 @@ private struct AssistantPermissionCard: View {
             case "floor": label = german ? "Etage" : "Floor"
             default: label = german ? "Geräteklasse" : "Device class"
             }
-            return "\(label): \(Self.label(value))"
+            return "\(label): \(ActionConfirmationPresentation.value(value, field: key, language: language))"
         }
         if !named.isEmpty { return named.joined(separator: " · ") }
-        return light ? (german ? "Alle Lichter" : "All lights") : request.capability.rawValue
-    }
-    private static func label(_ value: ConversationValue) -> String {
-        switch value {
-        case .string(let text): return text
-        case .integer(let value): return String(value)
-        case .number(let value): return String(value)
-        case .boolean(let value): return value ? "true" : "false"
-        case .array(let values): return values.map(label).joined(separator: ", ")
-        }
+        return light ? (german ? "Alle Lichter" : "All lights")
+            : (german ? "Prüfe Ziel und Einstellungen." : "Check the target and settings.")
     }
 
     var body: some View {
@@ -355,13 +347,20 @@ private struct AssistantPermissionCard: View {
                 }
             }
             if !light {
-                ForEach(request.arguments.keys.sorted(), id: \.self) { key in
-                    if let value = request.arguments[key] {
-                        Text("\(key): \(Self.label(value))").font(.subheadline)
-                            .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(ActionConfirmationPresentation.fields(request.arguments, language: language)) { field in
+                        LabeledContent {
+                            Text(verbatim: field.value).multilineTextAlignment(.trailing)
+                                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                        } label: {
+                            Text(verbatim: field.label).foregroundStyle(.secondary)
+                        }
+                        .font(.subheadline)
                     }
                 }
             }
+            Text(german ? "Zum Ändern abbrechen und die Anfrage neu formulieren." : "Cancel to change the request.")
+                .font(.caption).foregroundStyle(.secondary)
             DisclosureGroup(isExpanded: $expanded) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(request.capability.rawValue).fontWeight(.medium)
@@ -390,6 +389,8 @@ private struct AssistantPermissionCard: View {
                     Text(german ? "Abbrechen" : "Cancel").frame(maxWidth: .infinity, minHeight: 28)
                 }
                 .buttonStyle(.bordered).accessibilityIdentifier("assistant.action.deny")
+                .accessibilityHint(german ? "Führt die Aktion nicht aus. Du kannst die Anfrage anschließend ändern."
+                                         : "Does not run the action. You can then change the request.")
                 Button { allow(alwaysAllow) } label: {
                     Text(light ? (turningOff ? (german ? "Ausschalten" : "Switch off") : (german ? "Einschalten" : "Switch on"))
                          : (german ? "Bestätigen" : "Confirm"))

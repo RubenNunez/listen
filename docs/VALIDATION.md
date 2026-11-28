@@ -142,6 +142,13 @@ instructions are never narrated. Generic Home Assistant on/off tools require a n
 explicit domain when their schema offers a domain array; execution supplies no guessed
 device type or all-device default.
 
+Confirmation fields use localized labels and readable language/action values, while
+retaining every supplied field and the exact typed request used for authorization.
+Unknown values remain literal; exact JSON stays under action details. Cancel remains
+the same denial path and now explains how to reformulate a request. Three synthetic
+formatting checks and a Mac Catalyst SDK build passed. Device layout and interaction
+acceptance remain pending; no new conversation or device action was run for this check.
+
 Playback receipts reject explicit conflicts between requested, selected and observed
 season/episode/year, media IDs and trailing `SxxExx` player-title markers. Matching
 stable media IDs permit display aliases but never override an episode conflict.
